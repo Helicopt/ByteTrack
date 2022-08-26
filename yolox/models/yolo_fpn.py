@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from .darknet import Darknet
 from .network_blocks import BaseConv
+from yolox.utils import torch_load
 
 
 class YOLOFPN(nn.Module):
@@ -52,7 +53,7 @@ class YOLOFPN(nn.Module):
 
     def load_pretrained_model(self, filename="./weights/darknet53.mix.pth"):
         with open(filename, "rb") as f:
-            state_dict = torch.load(f, map_location="cpu")
+            state_dict = torch_load(f, map_location="cpu")
         print("loading pretrained weights...")
         self.backbone.load_state_dict(state_dict)
 

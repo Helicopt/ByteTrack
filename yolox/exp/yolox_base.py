@@ -246,3 +246,16 @@ class Exp(BaseExp):
 
     def eval(self, model, evaluator, is_distributed, half=False):
         return evaluator.evaluate(model, is_distributed, half)
+
+    def config_test(self, cmd: str):
+        if cmd == 'default':
+            return
+        if cmd.startswith('real') and hasattr(self, 'get_test_real_loader'):
+            self.val_ann = 'test.json'
+            cmd = cmd[4:]
+            args = cmd.split(';')
+            if len(args) > 0:
+                w = int(args[0])
+                if w == 1920:
+                    self.test_size = (736, 1920)
+            self.get_eval_loader = self.get_test_real_loader

@@ -1,3 +1,16 @@
+from loguru import logger
+try:
+    import mc
+    mc_enable = True
+    # server_list_config_file = "/mnt/lustre/share/memcached_client/server_list.conf"
+    # client_config_file = "/mnt/lustre/share/memcached_client/client.conf"
+    # mclient = mc.MemcachedClient.GetInstance(server_list_config_file, client_config_file)
+    logger.info('memcache is enabled')
+    print('memcache is enabled')
+except ImportError:
+    mc_enable = False
+    logger.info('memcache is NOT enabled')
+    print('memcache is NOT enabled')
 import cv2
 import numpy as np
 from pycocotools.coco import COCO
@@ -45,6 +58,7 @@ class MOTDataset(Dataset):
         self.name = name
         self.img_size = img_size
         self.preproc = preproc
+        self.mclient = None
 
     def __len__(self):
         return len(self.ids)
@@ -90,6 +104,15 @@ class MOTDataset(Dataset):
     def load_anno(self, index):
         return self.annotations[index][0]
 
+    def _ensure_memcached(self):
+        if self.mclient is None:
+            #首先，指定服务器列表文件和配置文件的读取路径
+            server_list_config_file = "/mnt/lustre/share/memcached_client/server_list.conf"
+            client_config_file = "/mnt/lustre/share/memcached_client/client.conf"
+            #然后获取一个mc对象
+            self.mclient = mc.MemcachedClient.GetInstance(server_list_config_file, client_config_file)
+        return
+
     def pull_item(self, index):
         id_ = self.ids[index]
 
@@ -98,7 +121,15 @@ class MOTDataset(Dataset):
         img_file = os.path.join(
             self.data_dir, self.name, file_name
         )
-        img = cv2.imread(img_file)
+        if mc_enable:
+            self._ensure_memcached()
+            value = mc.pyvector()
+            self.mclient.Get(img_file, value)
+            value_buf = mc.ConvertBuffer(value)
+            img_array = np.frombuffer(value_buf, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        else:
+            img = cv2.imread(img_file)
         assert img is not None
 
         return img, res.copy(), img_info, np.array([id_])

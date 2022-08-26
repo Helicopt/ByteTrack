@@ -16,6 +16,7 @@ from yolox.tracker.byte_tracker import BYTETracker
 from yolox.sort_tracker.sort import Sort
 from yolox.deepsort_tracker.deepsort import DeepSort
 from yolox.motdt_tracker.motdt_tracker import OnlineTracker
+from yolox.utils import torch_load
 
 import contextlib
 import io
@@ -119,7 +120,7 @@ class MOTEvaluator:
             from torch2trt import TRTModule
 
             model_trt = TRTModule()
-            model_trt.load_state_dict(torch.load(trt_file))
+            model_trt.load_state_dict(torch_load(trt_file))
 
             x = torch.ones(1, 3, test_size[0], test_size[1]).cuda()
             model(x)
@@ -263,7 +264,7 @@ class MOTEvaluator:
             from torch2trt import TRTModule
 
             model_trt = TRTModule()
-            model_trt.load_state_dict(torch.load(trt_file))
+            model_trt.load_state_dict(torch_load(trt_file))
 
             x = torch.ones(1, 3, test_size[0], test_size[1]).cuda()
             model(x)
@@ -386,7 +387,7 @@ class MOTEvaluator:
             from torch2trt import TRTModule
 
             model_trt = TRTModule()
-            model_trt.load_state_dict(torch.load(trt_file))
+            model_trt.load_state_dict(torch_load(trt_file))
 
             x = torch.ones(1, 3, test_size[0], test_size[1]).cuda()
             model(x)
@@ -509,7 +510,7 @@ class MOTEvaluator:
             from torch2trt import TRTModule
 
             model_trt = TRTModule()
-            model_trt.load_state_dict(torch.load(trt_file))
+            model_trt.load_state_dict(torch_load(trt_file))
 
             x = torch.ones(1, 3, test_size[0], test_size[1]).cuda()
             model(x)

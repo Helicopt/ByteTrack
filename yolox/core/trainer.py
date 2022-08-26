@@ -19,6 +19,8 @@ from yolox.utils import (
     get_world_size,
     gpu_mem_usage,
     load_ckpt,
+    torch_load,
+    ckpt_exists,
     occupy_mem,
     save_checkpoint,
     setup_logger,
@@ -264,14 +266,16 @@ class Trainer:
         return self.epoch * self.max_iter + self.iter
 
     def resume_train(self, model):
-        if self.args.resume:
+        resume_ckpt_file = os.path.join(self.file_name, "latest" + "_ckpt.pth.tar")
+        if self.args.resume and ckpt_exists(resume_ckpt_file):
             logger.info("resume training")
-            if self.args.ckpt is None:
-                ckpt_file = os.path.join(self.file_name, "latest" + "_ckpt.pth.tar")
-            else:
-                ckpt_file = self.args.ckpt
+            # if self.args.ckpt is None:
+            #     ckpt_file = os.path.join(self.file_name, "latest" + "_ckpt.pth.tar")
+            # else:
+            #     ckpt_file = self.args.ckpt
+            ckpt_file = resume_ckpt_file
 
-            ckpt = torch.load(ckpt_file, map_location=self.device)
+            ckpt = torch_load(ckpt_file, map_location=self.device)
             # resume the model/optimizer state dict
             model.load_state_dict(ckpt["model"])
             self.optimizer.load_state_dict(ckpt["optimizer"])
@@ -290,7 +294,7 @@ class Trainer:
             if self.args.ckpt is not None:
                 logger.info("loading checkpoint for fine tuning")
                 ckpt_file = self.args.ckpt
-                ckpt = torch.load(ckpt_file, map_location=self.device)["model"]
+                ckpt = torch_load(ckpt_file, map_location=self.device)["model"]
                 model = load_ckpt(model, ckpt)
             self.start_epoch = 0
 

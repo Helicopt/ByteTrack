@@ -76,6 +76,8 @@ class MOTEvaluator:
         self.nmsthre = nmsthre
         self.num_classes = num_classes
         self.args = args
+        if not hasattr(self.args, 'ldr'):
+            self.args.ldr = False
 
     def evaluate(
         self,
@@ -127,6 +129,7 @@ class MOTEvaluator:
             model = model_trt
             
         tracker = BYTETracker(self.args)
+        first_time = True
         ori_thresh = self.args.track_thresh
         for cur_iter, (imgs, _, info_imgs, ids) in enumerate(
             progress_bar(self.dataloader)
@@ -137,30 +140,43 @@ class MOTEvaluator:
                 video_id = info_imgs[3].item()
                 img_file_name = info_imgs[4]
                 video_name = img_file_name[0].split('/')[0]
-                if video_name == 'MOT17-05-FRCNN' or video_name == 'MOT17-06-FRCNN':
+                if video_name == 'MOT17-05' or video_name == 'MOT17-06':
                     self.args.track_buffer = 14
-                elif video_name == 'MOT17-13-FRCNN' or video_name == 'MOT17-14-FRCNN':
+                elif video_name == 'MOT17-13' or video_name == 'MOT17-14':
                     self.args.track_buffer = 25
                 else:
                     self.args.track_buffer = 30
 
-                if video_name == 'MOT17-01-FRCNN':
+                if video_name == 'MOT17-01':
                     self.args.track_thresh = 0.65
-                elif video_name == 'MOT17-06-FRCNN':
+                elif video_name == 'MOT17-06':
                     self.args.track_thresh = 0.65
-                elif video_name == 'MOT17-12-FRCNN':
+                elif video_name == 'MOT17-12':
                     self.args.track_thresh = 0.7
-                elif video_name == 'MOT17-14-FRCNN':
+                elif video_name == 'MOT17-14':
                     self.args.track_thresh = 0.67
                 elif video_name in ['MOT20-06', 'MOT20-08']:
                     self.args.track_thresh = 0.3
+                    model_type = str(model.backbone.__class__)
+                    if first_time:
+                        logger.info(model_type)
+                    if 'YOLOResPAFPN' in model_type:
+                        self.args.track_thresh = 0.6
+                        if first_time:
+                            logger.info('special setting for R50: %.3f' % self.args.track_thresh)
                 else:
                     self.args.track_thresh = ori_thresh
+                if self.args.ldr:
+                    self.args.track_thresh += 0.1
+                    if first_time:
+                        logger.info('special setting for low label regime: %.3f' % self.args.track_thresh)
+                first_time = False
 
                 if video_name not in video_names:
                     video_names[video_id] = video_name
                 if frame_id == 1:
                     tracker = BYTETracker(self.args)
+                    first_time = True
                     if len(results) != 0:
                         result_filename = os.path.join(result_folder, '{}.txt'.format(video_names[video_id - 1]))
                         write_results(result_filename, results)

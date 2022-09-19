@@ -54,6 +54,8 @@ class Trainer:
         self.input_size = exp.input_size
         self.best_ap = 0
 
+        self.id_profile = hasattr(self.exp, 'id_profile') and self.exp.id_profile
+
         # metric record
         self.meter = MeterBuffer(window_size=exp.print_interval)
         self.file_name = os.path.join(exp.output_dir, args.experiment_name)
@@ -149,6 +151,15 @@ class Trainer:
             is_distributed=self.is_distributed,
             no_aug=self.no_aug,
         )
+
+        if self.id_profile:
+            self.profiling_model, self.profiling_data = self.exp.get_profiling_model()
+            if self.start_epoch == 0:
+                self.id_profiling(epoch=0)
+            else:
+                self.profiling_data = self.resume_profiling()
+            self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
+
         logger.info("init prefetcher, this might take one minute or less...")
         self.prefetcher = DataPrefetcher(self.train_loader)
         # max_iter means iters per epoch
@@ -213,6 +224,10 @@ class Trainer:
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()
+        if self.id_profile:
+            if (self.epoch + 1) % self.exp.eval_interval == 0:
+                self.id_profiling(epoch=self.epoch + 1)
+                self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
 
     def before_iter(self):
         pass
@@ -331,3 +346,56 @@ class Trainer:
                 self.file_name,
                 ckpt_name,
             )
+
+    def get_profile_partition(self):
+        rank = self.rank
+        all_ids = sorted(self.profiling_data.keys())
+        n = len(all_ids)
+        WS = get_world_size()
+        S = (n + WS - 1) // WS
+        st = rank * S
+        en = min(st + S, n)
+        return [all_ids[i] for i in range(st, en)]
+
+    def evaluate_specific(self, todos):
+        evalmodel = self.ema_model.ema if self.use_model_ema else self.model
+        evaluator = self.exp.get_specific_evaluator(todos, batch_size=self.args.batch_size, is_distributed=False)
+        preds = self.exp.eval(
+            evalmodel, evaluator, False,
+        )
+        return preds
+
+    def id_profiling(self, epoch):
+        todos = self.get_profile_partition()
+        self.profile_runner = self.exp.get_profile_runner()
+        gt_ssl = self.train_loader.dataset._dataset.pseu_boxes(todos)
+        if epoch == 0:
+            observation = gt_ssl
+        else:
+            gt_pred = self.evaluate_specific(todos)
+            observation = self.profile_runner.merge_profile(gt_pred, gt_ssl)
+        new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
+        self.save_profiling(new_data, epoch)
+        synchronize()
+        self.profiling_data = self.resume_profiling()
+
+    def resume_profiling(self):
+        for k in self.profiling_data.keys():
+            filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
+            d = torch_load(filename)
+            kwargs, _ = self.profiling_data[k]
+            saved_kwargs = d['data'][0]
+            assert len(set(saved_kwargs.keys()) - set(kwargs.keys())) == 0
+            for rk in saved_kwargs:
+                assert kwargs[rk] == saved_kwargs[rk]
+            self.profiling_data[k] = (kwargs, d['data'][1])
+        return self.profiling_data
+
+    def save_profiling(self, data, epoch):
+        for k, v in data.items():
+            pkl_dict = {
+                'epoch': epoch,
+                'data': v,
+                'video_id': k,
+            }
+            save_checkpoint(pkl_dict, False, self.file_name, 'profile_%s' % str(k))

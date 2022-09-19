@@ -6,11 +6,11 @@ try:
     # client_config_file = "/mnt/lustre/share/memcached_client/client.conf"
     # mclient = mc.MemcachedClient.GetInstance(server_list_config_file, client_config_file)
     logger.info('memcache is enabled')
-    print('memcache is enabled')
+    # print('memcache is enabled')
 except ImportError:
     mc_enable = False
     logger.info('memcache is NOT enabled')
-    print('memcache is NOT enabled')
+    # print('memcache is NOT enabledz')
 import cv2
 import numpy as np
 from pycocotools.coco import COCO

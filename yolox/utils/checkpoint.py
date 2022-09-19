@@ -8,6 +8,7 @@ from loguru import logger
 import torch
 
 import io
+import shutil
 from petrel_client.client import Client as pc
 
 
@@ -81,3 +82,13 @@ def save_checkpoint(state, is_best, save_dir, model_name=""):
     if is_best:
         best_filename = os.path.join(save_dir, "best_ckpt.pth.tar")
         shutil.copyfile(filename, best_filename)
+
+def file_rm(src):
+    identifier = 'YOLOX_outputs'
+    if identifier in src:
+        pclient = pc()
+        s3_path = 's3://toka/%s' % identifier + src.split(identifier)[-1]
+        return pclient.delete(s3_path)
+    else:
+        return shutil.rmtree(src)
+

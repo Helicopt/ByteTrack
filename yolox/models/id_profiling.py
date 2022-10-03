@@ -1,3 +1,5 @@
+from loguru import logger
+import math
 import torch
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
@@ -49,7 +51,10 @@ class HungarianCoverage(nn.Module):
             overlaps = self.bbox_overlaps(boxes_i, det_box_i)
             feat_i = feats[:, :, i]
             det_feat_i = embedding
-            cos_sim = feat_i.matmul(det_feat_i.T)
+            if det_feat_i is not None:
+                cos_sim = feat_i.matmul(det_feat_i.T)
+            else:
+                cos_sim = overlaps.new_zeros(overlaps.shape)
             # print(cos_sim.shape, cos_sim.max(), cos_sim.min())
             # print(boxes_i)
             if overlaps.shape[1] == 0:
@@ -69,12 +74,14 @@ class HungarianCoverage(nn.Module):
                 if verbose and i == 1:
                     print(mx)
                 x_det_scores = det_score_i[x[pos_mask]]
-                weighted_mx = (mx * x_det_scores).sum()
+                # weighted_mx = (mx * x_det_scores).sum()
+                weighted_mx = mx.sum()
                 cover += weighted_mx
                 # cover += mx.sum()
-                cover += (1 -
-                          torch.abs(scores_i[pos_mask] - x_det_scores)
-                          ).sum() / self.T
+                # cover += (1 -
+                #           torch.abs(scores_i[pos_mask] - x_det_scores)
+                #           ).sum() / self.T
+                cover += scores_i[pos_mask].sum() / self.T
                 cover -= scores_i[~pos_mask].sum() / self.T
         return cover, ret
 
@@ -125,6 +132,11 @@ class SimuModel(nn.Module):
         self.dim = dim
         self.gen_params()
         self.build_models()
+
+    def self_check(self):
+        logger.info('N * T = {} * {}'.format(self.track_num, self._real_length))
+        for p, s in self.named_parameters():
+            logger.info('{}, {}, {}, {}'.format(p, s.shape, s.requires_grad, s.mean()))
 
     def build_models(self):
         self.coverage_module = HungarianCoverage()
@@ -179,11 +191,15 @@ class SimuModel(nn.Module):
             self.gen_params(append=True)
         xy = dets[:, 0:2].clone()
         xy = torch.clamp(xy, min=1)
+        # xy = torch.clamp(xy, min=1)
         wh = dets[:, 2:4] - dets[:, 0:2]
         wh = torch.clamp(wh, min=1)
+        # intv = (self._real_length - 1) // (self.anchor_point - 1)
+        # frame = round(frame / intv)
         self.xys.data[start:start + n, :, 0] = xy.log()
         self.whs.data[start:start + n, :, 0] = wh.log()
-        self.feats.data[start:start + n, :, 0] = embeds
+        if embeds is not None:
+            self.feats.data[start:start + n, :, 0] = embeds
 
     def forward(self, inputs, verbose=False, M=-1):
         self._verbose = verbose
@@ -214,6 +230,7 @@ class SimuModel(nn.Module):
         M = self.first_M(M)
         # scores = torch.sigmoid(self.scores).detach()
         xys = self.dxys[:M]  # * self.base
+        # print(xys.shape)
         return self.smoothness_module(xys)
 
     def integrity(self, M=-1):

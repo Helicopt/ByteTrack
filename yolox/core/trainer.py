@@ -54,7 +54,9 @@ class Trainer:
         self.input_size = exp.input_size
         self.best_ap = 0
 
-        self.id_profile = hasattr(self.exp, 'id_profile') and self.exp.id_profile
+        self.id_profile = hasattr(self.exp, 'id_profile') and self.exp.id_profile \
+            and hasattr(self.exp, 'switched_pseu') and self.exp.switched_pseu
+        self.multi_stage = hasattr(self.exp, 'multi_stage') and self.exp.multi_stage
 
         # metric record
         self.meter = MeterBuffer(window_size=exp.print_interval)
@@ -152,16 +154,6 @@ class Trainer:
             no_aug=self.no_aug,
         )
 
-        if self.id_profile:
-            self.profiling_model, self.profiling_data = self.exp.get_profiling_model()
-            if self.start_epoch == 0:
-                self.id_profiling(epoch=0)
-            else:
-                self.profiling_data = self.resume_profiling()
-            self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
-
-        logger.info("init prefetcher, this might take one minute or less...")
-        self.prefetcher = DataPrefetcher(self.train_loader)
         # max_iter means iters per epoch
         self.max_iter = len(self.train_loader)
 
@@ -180,6 +172,17 @@ class Trainer:
 
         self.model = model
         self.model.train()
+
+        if self.id_profile:
+            self.profiling_model, self.profiling_data = self.exp.get_profiling_model()
+            if self.start_epoch == 0:
+                self.id_profiling(epoch=0)
+            else:
+                self.profiling_data = self.resume_profiling()
+            self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
+
+        logger.info("init prefetcher, this might take one minute or less...")
+        self.prefetcher = DataPrefetcher(self.train_loader)
 
         self.evaluator = self.exp.get_evaluator(
             batch_size=self.args.batch_size, is_distributed=self.is_distributed
@@ -224,7 +227,7 @@ class Trainer:
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()
-        if self.id_profile:
+        if self.id_profile and self.multi_stage:
             if (self.epoch + 1) % self.exp.eval_interval == 0:
                 self.id_profiling(epoch=self.epoch + 1)
                 self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
@@ -363,19 +366,22 @@ class Trainer:
         preds = self.exp.eval(
             evalmodel, evaluator, False,
         )
+        self.model.train()
         return preds
 
     def id_profiling(self, epoch):
         todos = self.get_profile_partition()
         self.profile_runner = self.exp.get_profile_runner()
-        gt_ssl = self.train_loader.dataset._dataset.pseu_boxes(todos)
-        if epoch == 0:
-            observation = gt_ssl
-        else:
-            gt_pred = self.evaluate_specific(todos)
-            observation = self.profile_runner.merge_profile(gt_pred, gt_ssl)
-        new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
-        self.save_profiling(new_data, epoch)
+        if len(todos) > 0:
+            gt_ssl = self.train_loader.dataset._dataset.pseu_boxes(todos)
+            if epoch == 0:
+                observation = gt_ssl
+            else:
+                gt_pred = self.evaluate_specific(todos)
+                observation = self.profile_runner.merge(gt_pred, gt_ssl)
+            new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
+            self.save_profiling(new_data, epoch)
+        logger.info('waiting other processes to sync')
         synchronize()
         self.profiling_data = self.resume_profiling()
 
@@ -387,7 +393,8 @@ class Trainer:
             saved_kwargs = d['data'][0]
             assert len(set(saved_kwargs.keys()) - set(kwargs.keys())) == 0
             for rk in saved_kwargs:
-                assert kwargs[rk] == saved_kwargs[rk]
+                assert kwargs[rk] == saved_kwargs[rk] or rk == 'track_num'
+            kwargs['track_num'] = saved_kwargs['track_num']
             self.profiling_data[k] = (kwargs, d['data'][1])
         return self.profiling_data
 

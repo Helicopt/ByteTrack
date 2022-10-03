@@ -1,3 +1,5 @@
+# visualization images
+*.jpg
 # model training outputs / logs
 output_logs/
 arun_log/

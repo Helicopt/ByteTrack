@@ -137,12 +137,12 @@ class DetEvaluator:
             for row in part:
                 if row['video_id'] not in ret:
                     ret[row['video_id']] = {}
-                ret[row['video_id']][row['frame_id']] = row['boxes']
+                ret[row['video_id']][row['frame_id']] = row['boxes'].detach().cpu().numpy()
         return ret
 
     def convert_to_custom_format(self, outputs, info_imgs, ids):
         data_list = []
-        for (output, img_h, img_w, vid, fid, img_id) in zip(
+        for (output, img_h, img_w, fid, vid, img_id) in zip(
             outputs, info_imgs[0], info_imgs[1], info_imgs[2], info_imgs[3], ids
         ):
             if output is None:
@@ -159,18 +159,18 @@ class DetEvaluator:
             # bboxes = xyxy2xywh(bboxes)
 
             cls = output[:, 6]
-            scores = output[:, 4] * output[:, 5]
-            for ind in range(bboxes.shape[0]):
+            scores = (output[:, 4] * output[:, 5]).reshape(-1, 1)
+            # for ind in range(bboxes.shape[0]):
                 # label = self.dataloader.dataset.class_ids[int(cls[ind])]
-                pred_data = {
-                    "image_id": int(img_id),
-                    "boxes": torch.cat([bboxes, scores], dim=1),
-                    "video_id": int(vid),
-                    "frame_id": int(fid),
-                    # "category_id": label,
-                    # "bbox": bboxes[ind].numpy().tolist(),
-                    # "score": scores[ind].numpy().item(),
-                    # "segmentation": [],
-                }  # COCO json format
-                data_list.append(pred_data)
+            pred_data = {
+                "image_id": int(img_id),
+                "boxes": torch.cat([bboxes, scores], dim=1),
+                "video_id": int(vid),
+                "frame_id": int(fid),
+                # "category_id": label,
+                # "bbox": bboxes[ind].numpy().tolist(),
+                # "score": scores[ind].numpy().item(),
+                # "segmentation": [],
+            }  # COCO json format
+            data_list.append(pred_data)
         return data_list

@@ -28,13 +28,13 @@ def get_total_and_free_memory_in_Mb(cuda_device):
     return int(total), int(used)
 
 
-def occupy_mem(cuda_device, mem_ratio=0.95):
+def occupy_mem(cuda_device, mem_ratio=0.85):
     """
     pre-allocate gpu memory for training to avoid memory Fragmentation.
     """
     total, used = get_total_and_free_memory_in_Mb(cuda_device)
     max_mem = int(total * mem_ratio)
-    block_mem = max_mem - used
+    block_mem = max(max_mem - used, 1)
     x = torch.cuda.FloatTensor(256, 1024, block_mem)
     del x
     time.sleep(5)

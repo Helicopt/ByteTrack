@@ -77,13 +77,13 @@ def setup_logger(save_dir, distributed_rank=0, filename="log.txt", mode="a"):
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
-
+    filename = 'rk%d_%s' % (distributed_rank, filename)
     logger.remove()
     save_file = os.path.join(save_dir, filename)
     if mode == "o" and os.path.exists(save_file):
         os.remove(save_file)
     # only keep logger in rank0 process
-    if distributed_rank == 0:
+    if distributed_rank == 0 or True:
         logger.add(
             sys.stderr,
             format=loguru_format,

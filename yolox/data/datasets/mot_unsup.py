@@ -165,6 +165,7 @@ class UnSupMOTDataset(Dataset):
         strategy='att',
         search_size=960,
         max_prop=800,
+        max_area=240000,
         subset=None,
         preproc=None,
     ):
@@ -207,6 +208,7 @@ class UnSupMOTDataset(Dataset):
         self.search_size = search_size
         if self.subset is not None:
             self.filter_data()
+        self.max_area = max_area
 
     def filter_data(self):
         ids_ = []
@@ -304,7 +306,7 @@ class UnSupMOTDataset(Dataset):
                 'feat_anchor_point': None,
             }
             m = model_class(**kwargs)
-            m_state = {k: v.detach() for k, v in m.state_dict().items()}
+            m_state = {k: v.detach().cpu() for k, v in m.state_dict().items()}
             state_data[vid] = (kwargs, m_state)
         return state_data
 
@@ -349,7 +351,7 @@ class UnSupMOTDataset(Dataset):
         frame_boxes = boxes[frame_id - 1]
         mask = frame_boxes[:, 4] > 0.3
         areas = (frame_boxes[:, 2] - frame_boxes[:, 0]) * (frame_boxes[:, 3] - frame_boxes[:, 1])
-        mask = mask & (areas <= 30000) & (areas > 100)
+        mask = mask & (areas <= self.max_area) & (areas > 100)
         ind = np.nonzero(mask)[0]
         offset = video_id * self.track_num + 1
         frame_boxes = frame_boxes[mask]

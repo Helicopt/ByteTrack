@@ -213,8 +213,9 @@ class Trainer:
                 self.model.module.head.use_l1 = True
             else:
                 self.model.head.use_l1 = True
-            
-            self.exp.eval_interval = 1
+
+            if not self.id_profiling:
+                self.exp.eval_interval = 1
             if not self.no_aug:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
@@ -228,9 +229,11 @@ class Trainer:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()
         if self.id_profile and self.multi_stage:
-            if (self.epoch + 1) % self.exp.eval_interval == 0:
+            if (self.epoch + 1) % self.exp.eval_interval == 0 and self.exp.eval_interval > 1:
                 self.id_profiling(epoch=self.epoch + 1)
                 self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
+                logger.info("init prefetcher, this might take one minute or less...")
+                self.prefetcher = DataPrefetcher(self.train_loader)
 
     def before_iter(self):
         pass
@@ -352,7 +355,7 @@ class Trainer:
 
     def get_profile_partition(self):
         rank = self.rank
-        all_ids = sorted(self.profiling_data.keys())
+        all_ids = sorted(self.profiling_data.keys(), key=lambda x: abs(x - 4) * 2 + int(x > 4))
         n = len(all_ids)
         WS = get_world_size()
         S = (n + WS - 1) // WS

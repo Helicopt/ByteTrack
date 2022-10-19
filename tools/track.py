@@ -108,6 +108,7 @@ def make_parser():
     parser.add_argument("--match_thresh", type=float, default=0.9, help="matching threshold for tracking")
     parser.add_argument("--min-box-area", type=float, default=100, help='filter out tiny boxes')
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
+    parser.add_argument("--mix20", dest="mix20", default=False, action="store_true", help="test mix20.")
     parser.add_argument("--ldr", dest="ldr", default=False, action="store_true", help="testing for a Low Data Regime.")
     return parser
 
@@ -230,7 +231,9 @@ def main(exp, args, num_gpu):
     else:
         gt_type = ''
     print('gt_type', gt_type)
-    if args.mot20:
+    if args.mix20:
+        gtfiles = glob.glob(os.path.join('datasets/mix20/train', '*/gt/gt{}.txt'.format(gt_type)))
+    elif args.mot20:
         gtfiles = glob.glob(os.path.join('datasets/MOT20/train', '*/gt/gt{}.txt'.format(gt_type)))
     else:
         gtfiles = glob.glob(os.path.join('datasets/MOT17/train', '*/gt/gt{}.txt'.format(gt_type)))

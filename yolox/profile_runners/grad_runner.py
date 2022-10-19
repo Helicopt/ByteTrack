@@ -123,6 +123,15 @@ class GradRunner:
             2: ('MOT20', 'MOT20-02'),
             3: ('MOT20', 'MOT20-03'),
             4: ('MOT20', 'MOT20-05'),
+            6: ('sompt22', 'SOMPT22-02'),
+            7: ('sompt22', 'SOMPT22-04'),
+            8: ('sompt22', 'SOMPT22-05'),
+            9: ('sompt22', 'SOMPT22-07'),
+            10: ('sompt22', 'SOMPT22-08'),
+            11: ('sompt22', 'SOMPT22-10'),
+            12: ('sompt22', 'SOMPT22-11'),
+            13: ('sompt22', 'SOMPT22-12'),
+            14: ('sompt22', 'SOMPT22-13'),
         }[self._vid]
 
     def restore_path(self, meta, frame):
@@ -132,7 +141,7 @@ class GradRunner:
             ds, seq, fr)
         return img_path
 
-    def calc_acc(self, dets, length, thr=-1.):
+    def calc_acc(self, dets, length, thr=-1., max_area=30000):
         ds, seq = self.get_seq_info()
         gt = TrackSet(
             '/mnt/lustre/fengweitao.vendor/code/ByteTrack/datasets/%s/train/%s/gt/gt.txt' % (ds, seq))
@@ -149,7 +158,7 @@ class GradRunner:
             dt_row_ = dets[i]
             thr_mask = dt_row_[:, 4] > thr
             areas = (dt_row_[:, 2] - dt_row_[:, 0]) * (dt_row_[:, 3] - dt_row_[:, 1])
-            dt_row_ = dt_row_[thr_mask & (areas <= 30000) & (areas > 100)]
+            dt_row_ = dt_row_[thr_mask & (areas <= max_area) & (areas > 100)]
             dt_row = [Det(float(d[0]), float(d[1]), float(d[2]) - float(d[0]),
                           float(d[3]) - float(d[1])) for d in dt_row_]
             ma, l, r = LAP_Matching(dt_row, gt_row, lambda x, y: x.iou(y) if x.iou(y) > 0.4 else 0.)
@@ -185,7 +194,7 @@ class GradRunner:
         model.self_check()
         instance_ptr = 0
         frame_ptr = 1
-        bef_acc = self.calc_acc(input_data['dets'], length=klen)
+        bef_acc = self.calc_acc(input_data['dets'], length=klen, max_area=240000)
         while frame_ptr < klen:
             if frame_ptr not in input_data['dets']:
                 frame_ptr += 1
@@ -248,9 +257,10 @@ class GradRunner:
                         if i % 300 == 0:
                             res = model.get_boxes().permute(
                                 0, 2, 1).detach().cpu().numpy()[:instance_ptr]
-                            cur_acc = self.calc_acc(res.transpose(1, 0, 2), length=klen, thr=0.3)
+                            cur_acc = self.calc_acc(res.transpose(1, 0, 2), length=klen, thr=0.3, max_area=240000)
                             logger.info('before acc: %s, current acc: %s' %
                                         (str(bef_acc), str(cur_acc)))
+                            continue
                             for j in range(30):
                                 img_path = self.restore_path(input_data['metas'], j)
                                 row = res[:, j]

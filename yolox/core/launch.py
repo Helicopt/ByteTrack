@@ -156,13 +156,35 @@ def launch_by_subprocess(
         # spawn the processes
         cmd = ["python3", *raw_argv]
 
-        process = subprocess.Popen(cmd, env=current_env)
+        if local_rank == 0:
+            process = subprocess.Popen(cmd, env=current_env)
+        else:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=current_env)
         processes.append(process)
-
-    for process in processes:
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+    done_ranks = set()
+    while True:
+        finished_cnt = 0
+        for i, process in enumerate(processes):
+            retcode = process.poll()
+            if retcode is not None:
+                finished_cnt += 1
+                if i not in done_ranks:
+                    done_ranks.add(i)
+                    logger.info('Rank[%d] has finished the job with exit code %d.' % (i, retcode))
+                if i > 0:
+                    out_str = process.stdout.read()
+                    if len(out_str) > 0:
+                        logger.info('>>> Rank[%d] output: \n%s' % (i, out_str.decode('utf-8')))
+                        logger.info('<<< Rank[%d] output ends.' % i)
+                    err_str = process.stderr.read()
+                    if len(err_str) > 0:
+                        logger.info('>>> Rank[%d] error: \n%s' % (i, err_str.decode('utf-8')))
+                        logger.info('<<< Rank[%d] error ends.' % i)
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+        if finished_cnt >= len(processes):
+            break
+        time.sleep(2)
 
 
 def _distributed_worker(

@@ -81,6 +81,13 @@ def make_parser():
         help="switch to pseu dataset.",
     )
     parser.add_argument(
+        "--ft-tag",
+        dest="ft_tag",
+        type=str,
+        default=None,
+        help="set finetune dataset tag.",
+    )
+    parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
         default=None,
@@ -115,6 +122,9 @@ if __name__ == "__main__":
     if args.pseu:
         exp.switch_train_pseu()
         logger.warning('Switched to pseu training.')
+    else:
+        if args.ft_tag is not None:
+            exp.ft_tag = args.ft_tag
 
     if not args.experiment_name:
         args.experiment_name = exp.exp_name

@@ -130,6 +130,7 @@ class MOTEvaluator:
             
         tracker = BYTETracker(self.args)
         first_time = True
+        prev_vid = -1
         ori_thresh = self.args.track_thresh
         for cur_iter, (imgs, _, info_imgs, ids) in enumerate(
             progress_bar(self.dataloader)
@@ -140,6 +141,8 @@ class MOTEvaluator:
                 video_id = info_imgs[3].item()
                 img_file_name = info_imgs[4]
                 video_name = img_file_name[0].split('/')[0]
+                if '_train' in video_name:
+                    video_name = img_file_name[0].split('/')[1]
                 if video_name == 'MOT17-05' or video_name == 'MOT17-06':
                     self.args.track_buffer = 14
                 elif video_name == 'MOT17-13' or video_name == 'MOT17-14':
@@ -178,9 +181,10 @@ class MOTEvaluator:
                     tracker = BYTETracker(self.args)
                     first_time = True
                     if len(results) != 0:
-                        result_filename = os.path.join(result_folder, '{}.txt'.format(video_names[video_id - 1]))
+                        result_filename = os.path.join(result_folder, '{}.txt'.format(video_names[prev_vid]))
                         write_results(result_filename, results)
                         results = []
+                    prev_vid = video_id
 
                 imgs = imgs.type(tensor_type)
 

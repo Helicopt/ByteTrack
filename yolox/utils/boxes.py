@@ -64,6 +64,11 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45):
             nms_thre,
         )
         detections = detections[nms_out_index]
+
+        max_det = 2000
+        if detections.shape[0] > max_det:
+            detections = detections[:max_det]
+
         if output[i] is None:
             output[i] = detections
         else:

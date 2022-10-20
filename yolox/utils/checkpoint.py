@@ -9,7 +9,11 @@ import torch
 
 import io
 import shutil
-from petrel_client.client import Client as pc
+try:
+    from petrel_client.client import Client as pc
+    has_petrel = True
+except ImportError:
+    has_petrel = False
 
 
 def load_ckpt(model, ckpt):
@@ -39,7 +43,7 @@ def load_ckpt(model, ckpt):
 
 def ckpt_exists(filename):
     identifier = 'YOLOX_outputs'
-    if identifier in filename:
+    if identifier in filename and has_petrel:
         pclient = pc()
         s3_path = 's3://toka/%s' % identifier + filename.split(identifier)[-1]
         return pclient.contains(s3_path)
@@ -52,7 +56,7 @@ def ckpt_exists(filename):
 
 def torch_load(filename, map_location='cpu', **kwargs):
     identifier = 'YOLOX_outputs'
-    if identifier in filename:
+    if identifier in filename and has_petrel:
         pclient = pc()
         s3_path = 's3://toka/%s' % identifier + filename.split(identifier)[-1]
         with io.BytesIO(pclient.get(s3_path)) as f:
@@ -66,7 +70,7 @@ def save_checkpoint(state, is_best, save_dir, model_name=""):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     identifier = 'YOLOX_outputs'
-    if identifier in save_dir:
+    if identifier in save_dir and has_petrel:
         pclient = pc()
         s3_path = 's3://toka/%s' % identifier + save_dir.split(identifier)[-1]
         filename = os.path.join(s3_path, model_name + "_ckpt.pth.tar")
@@ -85,7 +89,7 @@ def save_checkpoint(state, is_best, save_dir, model_name=""):
 
 def file_rm(src):
     identifier = 'YOLOX_outputs'
-    if identifier in src:
+    if identifier in src and has_petrel:
         pclient = pc()
         s3_path = 's3://toka/%s' % identifier + src.split(identifier)[-1]
         return pclient.delete(s3_path)

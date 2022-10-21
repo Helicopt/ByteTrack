@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import torchvision
 import torch.nn.functional as F
+from senseTk.common import Det
+from senseTk.functions import LAP_Matching
 
 __all__ = [
     "filter_box",
@@ -16,6 +18,7 @@ __all__ = [
     "adjust_box_anns",
     "xyxy2xywh",
     "xyxy2cxcywh",
+    "quick_test",
 ]
 
 
@@ -46,7 +49,7 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45):
             continue
         # Get score and class with highest confidence
         class_conf, class_pred = torch.max(
-            image_pred[:, 5 : 5 + num_classes], 1, keepdim=True
+            image_pred[:, 5: 5 + num_classes], 1, keepdim=True
         )
 
         conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
@@ -136,3 +139,49 @@ def xyxy2cxcywh(bboxes):
     bboxes[:, 0] = bboxes[:, 0] + bboxes[:, 2] * 0.5
     bboxes[:, 1] = bboxes[:, 1] + bboxes[:, 3] * 0.5
     return bboxes
+
+
+def quick_test(dets, gts, thr=0.3, max_area=240000):
+    gt_cnt = 0
+    pd_cnt = 0
+    tp_cnt = 0
+    n = 0
+    if isinstance(dets, dict):
+        for i in dets:
+            n = max(n, dets[i].shape[0])
+        iterator = [(dets[k], gts[k]) for k in dets.keys()]
+    else:
+        for det in dets:
+            n = max(n, det.shape[0])
+        iterator = zip(dets, gts)
+    tr_rec = [{} for i in range(n)]
+    length = 0
+    for dt_row, gt_row in iterator:
+        length += 1
+        thr_mask = dt_row[:, 4] > thr
+        areas = (dt_row[:, 2] - dt_row[:, 0]) * (dt_row[:, 3] - dt_row[:, 1])
+        dt_row = dt_row[thr_mask & (areas <= max_area) & (areas > 100)]
+        dt_row = [Det(float(d[0]), float(d[1]), float(d[2]) - float(d[0]),
+                      float(d[3]) - float(d[1])) for d in dt_row]
+        if not isinstance(gt_row[0], Det):
+            gt_row = [Det(float(d[0]), float(d[1]), float(d[2]) - float(d[0]),
+                          float(d[3]) - float(d[1])) for d in gt_row]
+        ma, l, r = LAP_Matching(dt_row, gt_row, lambda x, y: x.iou(y) if x.iou(y) > 0.4 else 0.)
+        tp_cnt += len(ma)
+        gt_cnt += len(gt_row)
+        pd_cnt += len(dt_row)
+        for a, b in ma:
+            tr_rec[a][gt_row[b].uid] = tr_rec[a].get(gt_row[b].uid, 0) + 1
+    tr = 0
+    for i in range(n):
+        tmp = 0
+        for uid, c in tr_rec[i].items():
+            tmp += c * c
+        tmp /= length * length
+        tr += tmp
+    tr /= max(n, 1)
+    return {
+        'recall': tp_cnt / max(gt_cnt, 1),
+        'precision': tp_cnt / max(pd_cnt, 1),
+        'track_rate': tr,
+    }

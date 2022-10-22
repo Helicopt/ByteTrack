@@ -87,6 +87,7 @@ def save_checkpoint(state, is_best, save_dir, model_name=""):
         best_filename = os.path.join(save_dir, "best_ckpt.pth.tar")
         shutil.copyfile(filename, best_filename)
 
+
 def file_rm(src):
     identifier = 'YOLOX_outputs'
     if identifier in src and has_petrel:
@@ -94,5 +95,4 @@ def file_rm(src):
         s3_path = 's3://toka/%s' % identifier + src.split(identifier)[-1]
         return pclient.delete(s3_path)
     else:
-        return shutil.rmtree(src)
-
+        return os.remove(src)

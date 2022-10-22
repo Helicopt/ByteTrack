@@ -141,7 +141,7 @@ def xyxy2cxcywh(bboxes):
     return bboxes
 
 
-def quick_test(dets, gts, thr=0.3, max_area=240000):
+def quick_test(dets, gts, thr=-1, max_area=240000):
     gt_cnt = 0
     pd_cnt = 0
     tp_cnt = 0

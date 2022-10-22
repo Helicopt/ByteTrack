@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from yolox.data import DataPrefetcher
 from yolox.utils import (
+    is_main_process,
     MeterBuffer,
     ModelEMA,
     all_reduce_norm,
@@ -202,13 +203,16 @@ class Trainer:
         )
 
     def before_epoch(self):
-        logger.info("---> start train epoch{}".format(self.epoch + 1))
+        if is_main_process():
+            logger.info("---> start train epoch{}".format(self.epoch + 1))
 
         if self.epoch + 1 == self.max_epoch - self.exp.no_aug_epochs or self.no_aug:
             
-            logger.info("--->No mosaic aug now!")
+            if is_main_process():
+                logger.info("--->No mosaic aug now!")
             self.train_loader.close_mosaic()
-            logger.info("--->Add additional L1 loss now!")
+            if is_main_process():
+                logger.info("--->Add additional L1 loss now!")
             if self.is_distributed:
                 self.model.module.head.use_l1 = True
             else:
@@ -232,7 +236,8 @@ class Trainer:
             if (self.epoch + 1) % self.exp.eval_interval == 0 and self.exp.eval_interval > 1:
                 self.id_profiling(epoch=self.epoch + 1)
                 self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
-                logger.info("init prefetcher, this might take one minute or less...")
+                if is_main_process():
+                    logger.info("init prefetcher, this might take one minute or less...")
                 self.prefetcher = DataPrefetcher(self.train_loader)
 
     def before_iter(self):
@@ -245,7 +250,7 @@ class Trainer:
             * reset setting of resize
         """
         # log needed information
-        if (self.iter + 1) % self.exp.print_interval == 0:
+        if (self.iter + 1) % self.exp.print_interval == 0 and is_main_process():
             # TODO check ETA logic
             left_iters = self.max_iter * self.max_epoch - (self.progress_in_iter + 1)
             eta_seconds = self.meter["iter_time"].global_avg * left_iters
@@ -384,7 +389,8 @@ class Trainer:
                 observation = self.profile_runner.merge(gt_pred, gt_ssl)
             new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
             self.save_profiling(new_data, epoch)
-        logger.info('waiting other processes to sync')
+        if is_main_process():
+            logger.info('waiting other processes to sync')
         synchronize()
         self.profiling_data = self.resume_profiling()
 

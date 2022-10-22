@@ -81,7 +81,7 @@ class GradRunner:
             'length': len(keys),
             'data': data,
         }
-        logger.info('Loaded frames with {} ({} per frame) detections'.format(
+        print('Loaded frames with {} ({} per frame) detections'.format(
             cnt, cnt / ret['length']))
         return ret
 

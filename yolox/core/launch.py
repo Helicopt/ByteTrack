@@ -164,6 +164,8 @@ def launch_by_subprocess(
     done_ranks = set()
     while True:
         finished_cnt = 0
+        abnormal = False
+        returncode = 0
         for i, process in enumerate(processes):
             retcode = process.poll()
             if retcode is not None:
@@ -181,7 +183,11 @@ def launch_by_subprocess(
                         logger.info('>>> Rank[%d] error: \n%s' % (i, err_str.decode('utf-8')))
                         logger.info('<<< Rank[%d] error ends.' % i)
                 if process.returncode != 0:
-                    raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
+                    abnormal = True
+                    returncode = process.returncode
+        if abnormal:
+            raise subprocess.CalledProcessError(returncode=returncode, cmd=cmd)
+
         if finished_cnt >= len(processes):
             break
         time.sleep(2)

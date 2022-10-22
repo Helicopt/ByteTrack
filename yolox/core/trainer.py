@@ -387,7 +387,12 @@ class Trainer:
             else:
                 gt_pred = self.evaluate_specific(todos)
                 observation = self.profile_runner.merge(gt_pred, gt_ssl)
+            self.model.to('cpu')
+            torch.cuda.empty_cache()
             new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
+            self.model.to(self.device)
+            if self.args.occupy:
+                occupy_mem(self.local_rank)
             self.save_profiling(new_data, epoch)
         if is_main_process():
             logger.info('waiting other processes to sync')

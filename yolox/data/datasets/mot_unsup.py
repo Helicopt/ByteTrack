@@ -307,7 +307,10 @@ class UnSupMOTDataset(Dataset):
             self.filter_data()
         self.max_area = max_area
         if is_main_process() and not skip_test:
-            self.pretest_pseudo_labels()
+            if self.strategy == 'profiling' and not self.profile_inited:
+                pass
+            else:
+                self.pretest_pseudo_labels()
 
     def pretest_pseudo_labels(self):
         logger.info('quick test >>>')
@@ -463,6 +466,8 @@ class UnSupMOTDataset(Dataset):
             boxes = m.get_boxes()
             self.profile_boxes[vid] = boxes.detach().cpu().permute(2, 0, 1).numpy()
         self.profile_inited = True
+        if is_main_process():
+            self.pretest_pseudo_labels()
 
     def load_anno(self, index):
         return self.annotations[index][0]

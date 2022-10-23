@@ -209,6 +209,11 @@ class Trainer:
         if is_main_process():
             logger.info("---> start train epoch{}".format(self.epoch + 1))
 
+        if hasattr(self.exp, 'no_mosaic') and self.exp.no_mosaic:
+            if is_main_process():
+                logger.info("--->No mosaic aug now!")
+            self.train_loader.close_mosaic()
+
         if self.epoch + 1 == self.max_epoch - self.exp.no_aug_epochs or self.no_aug:
             
             if is_main_process():
@@ -221,7 +226,7 @@ class Trainer:
             else:
                 self.model.head.use_l1 = True
 
-            if not self.id_profiling:
+            if not (hasattr(self.exp, 'switched_pseu') and self.exp.switched_pseu):
                 self.exp.eval_interval = 1
             if not self.no_aug:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")

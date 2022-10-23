@@ -201,6 +201,9 @@ class Trainer:
                 self.best_ap * 100
             )
         )
+        if hasattr(self, 'prefetcher'):
+            del self.prefetcher
+            time.sleep(3)
 
     def before_epoch(self):
         if is_main_process():

@@ -676,6 +676,7 @@ class MOTEvaluator:
             _, tmp = tempfile.mkstemp()
             json.dump(data_dict, open(tmp, "w"))
             cocoDt = cocoGt.loadRes(tmp)
+            os.remove(tmp)
             '''
             try:
                 from yolox.layers import COCOeval_opt as COCOeval

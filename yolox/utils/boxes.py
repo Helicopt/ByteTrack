@@ -154,7 +154,7 @@ def quick_test(dets, gts, thr=-1, max_area=240000):
         for det in dets:
             n = max(n, det.shape[0])
         iterator = zip(dets, gts)
-    tr_rec = [{} for i in range(n)]
+    tr_rec = {}
     length = 0
     for dt_row, gt_row in iterator:
         length += 1
@@ -165,17 +165,21 @@ def quick_test(dets, gts, thr=-1, max_area=240000):
                       float(d[3]) - float(d[1])) for d in dt_row]
         if not isinstance(gt_row[0], Det):
             gt_row = [Det(float(d[0]), float(d[1]), float(d[2]) - float(d[0]),
-                          float(d[3]) - float(d[1])) for d in gt_row]
+                          float(d[3]) - float(d[1]), uid=int(d[5])) for d in gt_row]
         ma, l, r = LAP_Matching(dt_row, gt_row, lambda x, y: x.iou(y) if x.iou(y) > 0.4 else 0.)
         tp_cnt += len(ma)
         gt_cnt += len(gt_row)
         pd_cnt += len(dt_row)
         for a, b in ma:
-            tr_rec[a][gt_row[b].uid] = tr_rec[a].get(gt_row[b].uid, 0) + 1
+            gid = gt_row[b].uid
+            if gid not in tr_rec:
+                tr_rec[gid] = {}
+            tr_rec[gid][a] = tr_rec[gid].get(a, []) + [length]
     tr = 0
-    for i in range(n):
+    for i in tr_rec:
         tmp = 0
         for uid, c in tr_rec[i].items():
+            c = len(c)
             tmp += c * c
         tmp /= length * length
         tr += tmp

@@ -33,7 +33,7 @@ if __name__ == '__main__':
         video_cnt = 0
         tid_curr = 0
         # tid_last = -1
-        all_ids = set()
+        all_ids = {}
         for seq in sorted(seqs):
             if '.DS_Store' in seq:
                 continue
@@ -116,13 +116,16 @@ if __name__ == '__main__':
                             category_id = 1  # pedestrian(non-static)
                             if not ((track_id, seq) in all_ids):
                                 tid_curr += 1
-                                all_ids.add((track_id, seq))
+                                track_id_real = tid_curr
+                                all_ids[(track_id, seq)] = track_id_real
+                            else:
+                                track_id_real = all_ids[(track_id, seq)]
                     else:
                         category_id = 1
                     ann = {'id': ann_cnt,
                            'category_id': category_id,
                            'image_id': image_cnt + frame_id,
-                           'track_id': tid_curr,
+                           'track_id': track_id_real,
                            'bbox': anns[i][2:6].tolist(),
                            'conf': float(anns[i][6]),
                            'iscrowd': 0,

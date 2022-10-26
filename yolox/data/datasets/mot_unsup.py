@@ -509,7 +509,7 @@ class UnSupMOTDataset(Dataset):
         return frame_boxes
 
     def pseu_boxes(self, todos):
-        assert self.action == 'load' and self.strategy == 'profiling', 'pseu labels not loaded'
+        assert self.action == 'load', 'pseu labels not loaded'
         ret = {}
         for vid in todos:
             ret[vid] = {}

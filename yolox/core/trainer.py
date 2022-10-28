@@ -179,7 +179,10 @@ class Trainer:
             if self.start_epoch == 0:
                 self.id_profiling(epoch=0)
             else:
-                self.profiling_data = self.resume_profiling()
+                self.profiling_data, epoch = self.resume_profiling(return_epoch=True)
+                target_epoch = (self.start_epoch // self.exp.eval_interval) * self.exp.eval_interval
+                if target_epoch > epoch:
+                    self.id_profiling(epoch=target_epoch)
             self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
 
         logger.info("init prefetcher, this might take one minute or less...")
@@ -397,6 +400,8 @@ class Trainer:
                 observation = self.profile_runner.merge(gt_pred, gt_ssl)
             self.model.to('cpu')
             torch.cuda.empty_cache()
+            if epoch > 0:
+                self.profile_runner.set_mode('hybrid')
             new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
             self.model.to(self.device)
             if self.args.occupy:
@@ -407,17 +412,21 @@ class Trainer:
         synchronize()
         self.profiling_data = self.resume_profiling()
 
-    def resume_profiling(self):
+    def resume_profiling(self, return_epoch=False):
+        epoch = None
         for k in self.profiling_data.keys():
             filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
             d = torch_load(filename)
             kwargs, _ = self.profiling_data[k]
             saved_kwargs = d['data'][0]
+            epoch = d['epoch'] if epoch is None else min(epoch, d['epoch'])
             assert len(set(saved_kwargs.keys()) - set(kwargs.keys())) == 0
             for rk in saved_kwargs:
                 assert kwargs[rk] == saved_kwargs[rk] or rk == 'track_num'
             kwargs['track_num'] = saved_kwargs['track_num']
             self.profiling_data[k] = (kwargs, d['data'][1])
+        if return_epoch:
+            return self.profiling_data, epoch 
         return self.profiling_data
 
     def save_profiling(self, data, epoch):

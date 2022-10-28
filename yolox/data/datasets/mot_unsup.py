@@ -310,9 +310,12 @@ class UnSupMOTDataset(Dataset):
             if self.strategy == 'profiling' and not self.profile_inited:
                 pass
             else:
-                self.pretest_pseudo_labels()
+                if self.action == 'generate':
+                    self.pretest_pseudo_labels()
+                else:
+                    self.pretest_pseudo_labels(num=None)
 
-    def pretest_pseudo_labels(self):
+    def pretest_pseudo_labels(self, num=20):
         logger.info('quick test >>>')
         metrics_all = {}
         vid_keys = sorted(list(self.video_infos.keys()))
@@ -323,7 +326,8 @@ class UnSupMOTDataset(Dataset):
             gts = []
             cnt = 0
             frs = sorted(list(self.video_infos[vid].keys()))
-            frs = frs[:20]
+            if num is not None:
+                frs = frs[:num]
             for fr in frs:
                 index = self.ids2indices[self.video_infos[vid][fr]]
                 dets = self.pull_item(index, adjust=False)[1]
@@ -344,11 +348,14 @@ class UnSupMOTDataset(Dataset):
         for i, vid in enumerate(vid_keys):
             metrics, cnt = metrics_threads[i]
             for k in metrics:
-                logger.info('video[%d].%s: %.6f' % (vid, k, metrics[k]))
+                if not k.startswith('data.'):
+                    logger.info('video[%d].%s: %.6f' % (vid, k, metrics[k]))
                 if k not in metrics_all:
                     metrics_all[k] = []
                 metrics_all[k].append((metrics[k], cnt))
         for k in metrics_all:
+            if k.startswith('data.'):
+                continue
             val_cum = 0
             cnt_cum = 0
             for val, cnt in metrics_all[k]:
@@ -362,7 +369,9 @@ class UnSupMOTDataset(Dataset):
         anno_ = []
         pseu_ = []
         new_idmapping = {}
+        new_video_info_ = {}
         for vid in self.subset:
+            new_video_info_[vid] = self.video_infos[vid]
             for frame_id in self.video_infos[vid]:
                 id_ = self.video_infos[vid][frame_id]
                 index = self.ids2indices[id_]
@@ -374,6 +383,7 @@ class UnSupMOTDataset(Dataset):
         self.annotations = anno_
         self.loaded_pseu_labels = pseu_
         self.ids2indices = new_idmapping
+        self.video_infos = new_video_info_
 
     def __len__(self):
         return len(self.ids)
@@ -467,7 +477,7 @@ class UnSupMOTDataset(Dataset):
             self.profile_boxes[vid] = boxes.detach().cpu().permute(2, 0, 1).numpy()
         self.profile_inited = True
         if is_main_process():
-            self.pretest_pseudo_labels()
+            self.pretest_pseudo_labels(num=None)
 
     def load_anno(self, index):
         return self.annotations[index][0]

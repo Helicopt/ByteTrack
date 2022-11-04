@@ -28,8 +28,12 @@ splits = {
         'mot20': ['MOT20-01', ],
         'sompt': [],
     },
+    'trainval': {
+        'mot20': ['MOT20-03', ],
+        'sompt': [],
+    },
     'val': {
-        'mot20': ['MOT20-03', 'MOT20-05', ],
+        'mot20': ['MOT20-05', ],
         'sompt': ['SOMPT22-11', 'SOMPT22-12', 'SOMPT22-13', ],
     }
 }
@@ -41,8 +45,12 @@ splits = {
         'mot20': ['MOT20-01', 'MOT20-02', ],
         'sompt': [],
     },
+    'trainval': {
+        'mot20': ['MOT20-03', ],
+        'sompt': [],
+    },
     'val': {
-        'mot20': ['MOT20-03', 'MOT20-05', ],
+        'mot20': ['MOT20-05', ],
         'sompt': ['SOMPT22-11', 'SOMPT22-12', 'SOMPT22-13', ],
     }
 }
@@ -54,8 +62,46 @@ splits = {
         'mot20': ['MOT20-01', 'MOT20-02', ],
         'sompt': ['SOMPT22-02', 'SOMPT22-04', 'SOMPT22-05', 'SOMPT22-07', 'SOMPT22-08', 'SOMPT22-10', ],
     },
+    'trainval': {
+        'mot20': ['MOT20-03', ],
+        'sompt': [],
+    },
     'val': {
-        'mot20': ['MOT20-03', 'MOT20-05', ],
+        'mot20': ['MOT20-05', ],
+        'sompt': ['SOMPT22-11', 'SOMPT22-12', 'SOMPT22-13', ],
+    }
+}
+
+# su03
+target_tag = 'su03'
+splits = {
+    'train': {
+        'mot20': [],
+        'sompt': ['SOMPT22-02', ],
+    },
+    'trainval': {
+        'mot20': ['MOT20-03', ],
+        'sompt': [],
+    },
+    'val': {
+        'mot20': ['MOT20-05', ],
+        'sompt': ['SOMPT22-11', 'SOMPT22-12', 'SOMPT22-13', ],
+    }
+}
+
+# su13
+target_tag = 'su13'
+splits = {
+    'train': {
+        'mot20': ['MOT20-01', ],
+        'sompt': ['SOMPT22-02', ],
+    },
+    'trainval': {
+        'mot20': ['MOT20-03', ],
+        'sompt': [],
+    },
+    'val': {
+        'mot20': ['MOT20-05', ],
         'sompt': ['SOMPT22-11', 'SOMPT22-12', 'SOMPT22-13', ],
     }
 }

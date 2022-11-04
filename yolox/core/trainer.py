@@ -180,9 +180,10 @@ class Trainer:
                 self.id_profiling(epoch=0)
             else:
                 self.profiling_data, epoch = self.resume_profiling(return_epoch=True)
-                target_epoch = (self.start_epoch // self.exp.eval_interval) * self.exp.eval_interval
-                if target_epoch > epoch:
-                    self.id_profiling(epoch=target_epoch)
+                if self.multi_stage:
+                    target_epoch = (self.start_epoch // self.exp.eval_interval) * self.exp.eval_interval
+                    if target_epoch > epoch:
+                        self.id_profiling(epoch=target_epoch)
             self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
 
         logger.info("init prefetcher, this might take one minute or less...")
@@ -238,11 +239,12 @@ class Trainer:
         if self.use_model_ema:
             self.ema_model.update_attr(self.model)
 
-        self.save_ckpt(ckpt_name="latest")
-
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()
+
+        self.save_ckpt(ckpt_name="latest")
+
         if self.id_profile and self.multi_stage:
             if (self.epoch + 1) % self.exp.eval_interval == 0 and self.exp.eval_interval > 1:
                 self.id_profiling(epoch=self.epoch + 1)
@@ -322,6 +324,7 @@ class Trainer:
                 else ckpt["start_epoch"]
             )
             self.start_epoch = start_epoch
+            self.best_ap = ckpt.get("best", self.best_ap)
             logger.info(
                 "loaded checkpoint '{}' (epoch {})".format(
                     self.args.resume, self.start_epoch
@@ -358,6 +361,7 @@ class Trainer:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
             logger.info("Save weights to {}".format(self.file_name))
             ckpt_state = {
+                "best": self.best_ap,
                 "start_epoch": self.epoch + 1,
                 "model": save_model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),

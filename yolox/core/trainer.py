@@ -326,8 +326,8 @@ class Trainer:
             self.start_epoch = start_epoch
             self.best_ap = ckpt.get("best", self.best_ap)
             logger.info(
-                "loaded checkpoint '{}' (epoch {})".format(
-                    self.args.resume, self.start_epoch
+                "loaded checkpoint '{}' (epoch {}, best ap {})".format(
+                    self.args.resume, self.start_epoch, self.best_ap
                 )
             )  # noqa
         else:

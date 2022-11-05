@@ -195,6 +195,10 @@ def main(exp, args, num_gpu):
         # load the model state dict
         model.load_state_dict(ckpt["model"])
         logger.info("loaded checkpoint done.")
+        if 'start_epoch' in ckpt:
+            logger.info('ckpt epoch {}'.format(ckpt['start_epoch']))
+        if 'best' in ckpt:
+            logger.info('ckpt best ap {}'.format(ckpt['best']))
 
     if is_distributed:
         model = DDP(model, device_ids=[rank])
@@ -271,11 +275,13 @@ def main(exp, args, num_gpu):
                        'partially_tracked', 'mostly_lost']
     for k in change_fmt_list:
         fmt[k] = fmt['mota']
-    print(mm.io.render_summary(summary, formatters=fmt, namemap=mm.io.motchallenge_metric_names))
+    summary_str = '\n' + str(mm.io.render_summary(summary, formatters=fmt, namemap=mm.io.motchallenge_metric_names))
+    logger.info(summary_str)
 
     metrics = mm.metrics.motchallenge_metrics + ['num_objects']
     summary = mh.compute_many(accs, names=names, metrics=metrics, generate_overall=True)
-    print(mm.io.render_summary(summary, formatters=mh.formatters, namemap=mm.io.motchallenge_metric_names))
+    summary_str = '\n' + str(mm.io.render_summary(summary, formatters=mh.formatters, namemap=mm.io.motchallenge_metric_names))
+    logger.info(summary_str)
     logger.info('Completed')
 
 
@@ -283,6 +289,7 @@ if __name__ == "__main__":
     args = make_parser().parse_args()
     exp = get_exp(args.exp_file, args.name)
     exp.merge(args.opts)
+    exp.is_val = True
     if hasattr(exp, 'config_test'):
         exp.config_test(args.test_type)
 

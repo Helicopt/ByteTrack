@@ -177,7 +177,11 @@ class Trainer:
         if self.id_profile:
             self.profiling_model, self.profiling_data = self.exp.get_profiling_model()
             if self.start_epoch == 0:
-                self.id_profiling(epoch=0)
+                p_data, epoch = self.resume_profiling(return_epoch=True)
+                if p_data is None and epoch is None or epoch != 0:
+                    self.id_profiling(epoch=0)
+                else:
+                    self.profiling_data = p_data
             else:
                 self.profiling_data, epoch = self.resume_profiling(return_epoch=True)
                 if self.multi_stage:
@@ -409,7 +413,7 @@ class Trainer:
             new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
             self.model.to(self.device)
             if self.args.occupy:
-                occupy_mem(self.local_rank)
+                occupy_mem(self.local_rank, mem_ratio=0.5)
             self.save_profiling(new_data, epoch)
         if is_main_process():
             logger.info('waiting other processes to sync')
@@ -417,6 +421,12 @@ class Trainer:
         self.profiling_data = self.resume_profiling()
 
     def resume_profiling(self, return_epoch=False):
+        for k in self.profiling_data.keys():
+            filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
+            if not ckpt_exists(filename):
+                if return_epoch:
+                    return None, None
+                return None
         epoch = None
         for k in self.profiling_data.keys():
             filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")

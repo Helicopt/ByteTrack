@@ -533,7 +533,7 @@ class UnSupMOTDataset(Dataset):
         # frame_boxes = frame_boxes[mask]
         frame_boxes[:, 4] = 0
         frame_boxes = np.concatenate(
-            [frame_boxes[:, :4], (frame_boxes[:, 5] + offset).reshape(-1, 1)], axis=1)
+            [frame_boxes[:, :5], (frame_boxes[:, 5] + offset).reshape(-1, 1)], axis=1)
         return frame_boxes
 
     def pseu_boxes(self, todos):

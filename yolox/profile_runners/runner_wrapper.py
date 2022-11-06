@@ -31,13 +31,14 @@ class Runner:
     def optimize(self, model, todos, observations):
         ret = {}
         for k in todos:
-            kwargs, state_dict = todos[k]
+            kwargs, (state_dict, results) = todos[k]
             model_inst = model(**kwargs)
             model_inst.load_state_dict(state_dict)
             self.runner.set_video_id(int(k))
             self.runner.set_mode(self.mode)
-            new_track_num = self.runner.optimize(model_inst, observations[k])
+            new_track_num, new_results = self.runner.optimize(
+                model_inst, observations[k], last_results=results)
             kwargs['track_num'] = new_track_num
             new_state_dict = model_inst.state_dict()
-            ret[k] = kwargs, {k: v.detach().cpu() for k, v in new_state_dict.items()}
+            ret[k] = kwargs, ({k: v.detach().cpu() for k, v in new_state_dict.items()}, new_results)
         return ret

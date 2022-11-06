@@ -426,7 +426,16 @@ class Exp(MyExp):
         from yolox.profile_runners import Runner, GradRunner, NMSMerger, ReplaceMerger
         return Runner(
             runner=GradRunner(
-
+                iter_num=300,
+                segment=100,
+                gap=10,
+                track_lr=0.01,
+                track_ratio=0.6,
+                track_thr=0.3,
+                merge_thr=0.8,
+                nms_thr=0.4,
+                s_weight=100,
+                i_weight=10,
             ),
             merger=ReplaceMerger(
 

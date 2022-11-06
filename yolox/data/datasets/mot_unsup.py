@@ -165,6 +165,9 @@ def detect_boxes(p, engine, max_box=300):
         raise NotImplementedError('%s is not recognised' % engine)
 
 
+MULTI_THREAD_ = True
+
+
 def att_search(img, h, w, adj_imgs, res_size=960, max_group=300, w1=0.5, w2=0.3, unmerged=False, box_engine='selective_search', use_sobel=False, rgb=False):
     scale = min(res_size / img.shape[1], 1.0)
     rW = int(img.shape[1] * scale)
@@ -200,16 +203,20 @@ def att_search(img, h, w, adj_imgs, res_size=960, max_group=300, w1=0.5, w2=0.3,
 
     all_boxes = [None] * len(img_diffs)
 
-    def mth_detect(p, i):
-        boxes = detect_boxes(p, engine=box_engine)
-        all_boxes[i] = boxes
-    all_threads = []
-    for i, p in enumerate(img_diffs):
-        thread = threading.Thread(target=mth_detect, args=(p, i))
-        thread.start()
-        all_threads.append(thread)
-    for thread in all_threads:
-        thread.join()
+    if MULTI_THREAD_:
+        def mth_detect(p, i):
+            boxes = detect_boxes(p, engine=box_engine)
+            all_boxes[i] = boxes
+        all_threads = []
+        for i, p in enumerate(img_diffs):
+            thread = threading.Thread(target=mth_detect, args=(p, i))
+            thread.start()
+            all_threads.append(thread)
+        for thread in all_threads:
+            thread.join()
+    else:
+        for i, p in enumerate(img_diffs):
+            all_boxes[i] = detect_boxes(p, engine=box_engine)
     gay_boxes = all_boxes[-1]
     all_boxes = all_boxes[:-1]
 
@@ -259,7 +266,7 @@ class UnSupMOTDataset(Dataset):
         box_engine='selective_search',
         search_size=960,
         max_prop=800,
-        max_area=240000,
+        max_area=150000,
         subset=None,
         preproc=None,
         skip_test=False,
@@ -294,7 +301,7 @@ class UnSupMOTDataset(Dataset):
         self.max_prop = max_prop
         self.mclient = None
         self.action = action
-        self.track_num = 100
+        self.track_num = 1
         self.profiling_density = 15
         self.profile_inited = False
         self.box_engine = box_engine
@@ -464,17 +471,27 @@ class UnSupMOTDataset(Dataset):
             }
             m = model_class(**kwargs)
             m_state = {k: v.detach().cpu() for k, v in m.state_dict().items()}
-            state_data[vid] = (kwargs, m_state)
+            state_data[vid] = (kwargs, (m_state, None))
         return state_data
 
     def set_profile(self, model_class, profile_data):
         self.profile_data = profile_data
         self.profile_boxes = {}
-        for vid, (kwargs, state) in profile_data.items():
-            m = model_class(**kwargs)
-            m.load_state_dict(state)
-            boxes = m.get_boxes()
-            self.profile_boxes[vid] = boxes.detach().cpu().permute(2, 0, 1).numpy()
+        self.offsets = {}
+        icnt = 0
+        for vid, (kwargs, data) in profile_data.items():
+            self.offsets[vid] = icnt
+            state, results = data
+            # m = model_class(**kwargs)
+            # m.load_state_dict(state)
+            # boxes = m.get_boxes(merge=False)
+            boxes = {f: b.detach().cpu().numpy() for f, b in results.items()}
+            idmax = -1
+            for f, v in boxes.items():
+                if v.shape[0] > 0:
+                    idmax = max(idmax, int(v[:, 5].max()))
+            icnt += idmax + 1
+            self.profile_boxes[vid] = boxes  # .permute(2, 0, 1).detach().cpu().numpy()
         self.profile_inited = True
         if is_main_process():
             self.pretest_pseudo_labels(num=None)
@@ -508,14 +525,15 @@ class UnSupMOTDataset(Dataset):
     def get_profiling_boxes(self, video_id, frame_id):
         boxes = self.profile_boxes[video_id]
         frame_boxes = boxes[frame_id - 1]
-        mask = frame_boxes[:, 4] > 0.3
-        areas = (frame_boxes[:, 2] - frame_boxes[:, 0]) * (frame_boxes[:, 3] - frame_boxes[:, 1])
-        mask = mask & (areas <= self.max_area) & (areas > 100)
-        ind = np.nonzero(mask)[0]
-        offset = video_id * self.track_num + 1
-        frame_boxes = frame_boxes[mask]
+        # mask = frame_boxes[:, 4] > 0.3
+        # areas = (frame_boxes[:, 2] - frame_boxes[:, 0]) * (frame_boxes[:, 3] - frame_boxes[:, 1])
+        # mask = mask & (areas <= self.max_area) & (areas > 100)
+        # ind = np.nonzero(mask)[0]
+        offset = self.offsets[video_id]
+        # frame_boxes = frame_boxes[mask]
         frame_boxes[:, 4] = 0
-        frame_boxes = np.concatenate([frame_boxes, (ind + offset).reshape(-1, 1)], axis=1)
+        frame_boxes = np.concatenate(
+            [frame_boxes[:, :4], (frame_boxes[:, 5] + offset).reshape(-1, 1)], axis=1)
         return frame_boxes
 
     def pseu_boxes(self, todos):

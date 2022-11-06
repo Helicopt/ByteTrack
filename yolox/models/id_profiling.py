@@ -10,8 +10,12 @@ import torch.optim as optim
 import numpy as np
 from lap import lapjv
 
+import threading
+
 
 class HungarianCoverage(nn.Module):
+
+    MULTI_THREAD = 1
 
     def __init__(self) -> None:
         self.T = 1
@@ -37,11 +41,9 @@ class HungarianCoverage(nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, boxes, scores, feats, dets, embeddings, verbose=False):
-        cover = 0
-        ret = []
-        # for i, (det, embedding) in enumerate(zip(dets, embeddings)):
-        for i in dets:
+    def forward(self, boxes, scores, feats, dets, embeddings, frange=None, verbose=False):
+
+        def process_one_frame(i):
             det = dets[i]
             embedding = embeddings[i]
             boxes_i = boxes[:, :, i]
@@ -57,16 +59,21 @@ class HungarianCoverage(nn.Module):
                 cos_sim = overlaps.new_zeros(overlaps.shape)
             # print(cos_sim.shape, cos_sim.max(), cos_sim.min())
             # print(boxes_i)
+            cover = 0
+            ret_item = None
             if overlaps.shape[1] == 0:
                 cover -= scores_i.sum() / self.T
-                ret.append(det.new_full((boxes_i.shape[0],), -1))
+                ret_item = det.new_full((boxes_i.shape[0],), -1)
             else:
                 d = overlaps + det_score_i.T + cos_sim * 0.5
-                d = d.detach().cpu().numpy()
-                cost, x, y = lapjv(-d, extend_cost=True)
-                x = torch.from_numpy(x).long().to(det.device)
+                if d.size(0) == 1:
+                    _, x = d.max(dim=1)
+                else:
+                    d = d.detach().cpu().numpy()
+                    cost, x, y = lapjv(-d, extend_cost=True)
+                    x = torch.from_numpy(x).long().to(det.device)
                 # print(x)
-                ret.append(x)
+                ret_item = x
                 pos_mask = x >= 0
                 matched = overlaps[pos_mask] + cos_sim[pos_mask] * 0.5
                 mx = torch.gather(matched, 1,
@@ -75,14 +82,69 @@ class HungarianCoverage(nn.Module):
                     print(mx)
                 x_det_scores = det_score_i[x[pos_mask]]
                 # weighted_mx = (mx * x_det_scores).sum()
-                weighted_mx = mx.sum()
+                weighted_mx = mx.sum() / (mx.size(0) + 1e-9)
                 cover += weighted_mx
+                sec_mask = (mx > 0.3).squeeze(1)
+                pos_iou_mask = (mx > 0.).squeeze(1)
+                sec_matched = matched[sec_mask]
+                trd_mask = sec_matched > 0.2
+                if sec_matched[trd_mask].size(0):
+                    cover += sec_matched[trd_mask].mean()
                 # cover += mx.sum()
                 # cover += (1 -
                 #           torch.abs(scores_i[pos_mask] - x_det_scores)
                 #           ).sum() / self.T
-                cover += scores_i[pos_mask].sum() / self.T
-                cover -= scores_i[~pos_mask].sum() / self.T
+                cover += scores_i[pos_mask][pos_iou_mask].sum() / (pos_iou_mask.sum() + 1e-9)
+                cover -= scores_i[pos_mask][~pos_iou_mask].sum() / \
+                    ((~pos_iou_mask).sum() + 1e-9) * 0.2
+                cover -= scores_i[~pos_mask].sum() / ((~pos_mask).sum() + 1e-9) * 0.9
+            return cover, ret_item
+
+        if boxes.size(0) == 1 or self.MULTI_THREAD == 1:
+            cover = 0
+            ret = []
+            # for i, (det, embedding) in enumerate(zip(dets, embeddings)):
+            for i in dets:
+                if frange is not None:
+                    if i < frange[0] or i > frange[1]:
+                        continue
+                cov_, ret_item = process_one_frame(i)
+                cover += cov_
+                ret.append(ret_item)
+            return cover, ret
+
+        if self.MULTI_THREAD > 1:
+
+            def f_func(j, S, frs, ret, covs):
+                for ind in range(j * S, j * S + S):
+                    if ind >= len(frs):
+                        break
+                    i = frs[ind]
+                    cover, ret_item = process_one_frame(i)
+                    covs[ind] = cover
+                    ret[ind] = ret_item
+
+            frs = []
+            for i in dets:
+                if frange is not None:
+                    if i < frange[0] or i > frange[1]:
+                        continue
+                frs.append(i)
+            S = (len(frs) + self.MULTI_THREAD - 1) // self.MULTI_THREAD
+            ret = [None] * len(frs)
+            covs = [None] * len(frs)
+            cover = 0
+            pool = []
+            for j in range(self.MULTI_THREAD):
+                thread = threading.Thread(target=f_func, args=(j, S, frs, ret, covs))
+                thread.start()
+                pool.append(thread)
+            for thread in pool:
+                thread.join()
+            for cov in covs:
+                cover += cov
+            return cover, ret
+
         return cover, ret
 
 
@@ -91,7 +153,7 @@ class LeastAcceleration(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, xys):
+    def forward(self, xys, whs):
         l = 1
         accel = (xys[:, :, l*2:] + xys[:, :, :-l*2] - xys[:, :, l:-l] * 2)
         a = ((accel ** 2).sum(dim=1)).mean()
@@ -109,6 +171,16 @@ class LeastVariance(nn.Module):
 
 
 class SimuModel(nn.Module):
+
+    param_keys = [
+        'dxys',
+        'xys',
+        'dwhs',
+        'whs',
+        'scores',
+        'dfeats',
+        'feats',
+    ]
 
     def __init__(self, track_num, anchor_point, seq_length, dim, feat_anchor_point=None):
         super().__init__()
@@ -133,10 +205,32 @@ class SimuModel(nn.Module):
         self.gen_params()
         self.build_models()
 
+    def get_anchor_frames(self):
+        ret = []
+        gsize = (self._real_length - 1) // (self.anchor_point - 1)
+        for i in range(self.anchor_point):
+            ret.append(i * gsize)
+        return ret
+
     def self_check(self):
         logger.info('N * T = {} * {}'.format(self.track_num, self._real_length))
         for p, s in self.named_parameters():
             logger.info('{}, {}, {}, {}'.format(p, s.shape, s.requires_grad, s.mean()))
+
+    def resize(self, num, clean=False):
+        self.track_num = num
+        if clean:
+            self.gen_params()
+        else:
+            for pk in self.param_keys:
+                data = getattr(self, pk).data[:self.track_num]
+                setattr(self, pk, nn.Parameter(data.detach()))
+
+    def recompose(self, mask):
+        self.track_num = int(sum(mask))
+        for pk in self.param_keys:
+            data = getattr(self, pk).data[mask]
+            setattr(self, pk, nn.Parameter(data.detach()))
 
     def build_models(self):
         self.coverage_module = HungarianCoverage()
@@ -153,7 +247,7 @@ class SimuModel(nn.Module):
             xys=torch.randn(to_append, 2, 1),
             dwhs=torch.zeros(to_append, 2, self.anchor_point),
             whs=torch.ones(to_append, 2, 1),
-            scores=-torch.ones(to_append, 1, self.anchor_point),
+            scores=torch.full((to_append, 1, self.anchor_point), -2, dtype=torch.float),
             dfeats=torch.zeros(to_append, self.dim, self.feat_anchors),
             feats=torch.randn(to_append, self.dim, 1),
         )
@@ -164,7 +258,11 @@ class SimuModel(nn.Module):
                 setattr(self, k, nn.Parameter(
                     torch.cat([odata, ndata.to(odata.device)], dim=0)))
             else:
-                setattr(self, k, nn.Parameter(ndata))
+                if hasattr(self, k):
+                    device = getattr(self, k).data.device
+                    setattr(self, k, nn.Parameter(ndata.to(device)))
+                else:
+                    setattr(self, k, nn.Parameter(ndata))
         # self.dxys = nn.Parameter(torch.randn(
         #     self.track_num, 2, self.anchor_point) + 1)
         # self.xys = nn.Parameter(torch.randn(self.track_num, 2, 1))
@@ -201,14 +299,19 @@ class SimuModel(nn.Module):
         if embeds is not None:
             self.feats.data[start:start + n, :, 0] = embeds
 
-    def forward(self, inputs, verbose=False, M=-1):
+    def extend_if_insufficient(self, M):
+        if M > self.track_num:
+            self.track_num = M
+            self.gen_params(append=True)
+
+    def forward(self, inputs, verbose=False, M=-1, frange=None):
         self._verbose = verbose
         dets = inputs['dets']
         embeddings = inputs['embeddings']
         # if isinstance(dets[0], np.ndarray):
         #     dets = [torch.from_numpy(dets_i).float() for dets_i in dets]
         #     embeddings = [torch.from_numpy(e_i).float() for e_i in embeddings]
-        coverage, match_recs = self.coverage(dets, embeddings, M=M)
+        coverage, match_recs = self.coverage(dets, embeddings, M=M, frange=frange)
         smoothness = self.smoothness(M=M)
         integrity = self.integrity(M=M)
         outputs = {
@@ -218,27 +321,28 @@ class SimuModel(nn.Module):
         }
         return outputs
 
-    def coverage(self, dets, embeddings, M=-1):
+    def coverage(self, dets, embeddings, M=-1, frange=None):
         boxes = self.get_boxes(M, with_score=False)
         feats = self.get_feats(M)
         scores = self.get_scores(M)
         cover, ret = self.coverage_module(
-            boxes, scores, feats, dets, embeddings, verbose=self._verbose)
+            boxes, scores, feats, dets, embeddings, frange=frange, verbose=self._verbose)
         return cover, ret
 
     def smoothness(self, M=-1):
         M = self.first_M(M)
         # scores = torch.sigmoid(self.scores).detach()
         xys = self.dxys[:M]  # * self.base
+        whs = self.dwhs[:M]  # * self.base
         # print(xys.shape)
-        return self.smoothness_module(xys)
+        return self.smoothness_module(xys, whs)
 
     def integrity(self, M=-1):
         M = self.first_M(M)
         dfeats = self.dfeats[:M]
         return self.integrity_module(dfeats)
 
-    def get_boxes(self, M=-1, with_score=True):
+    def get_boxes(self, M=-1, length=-1, with_score=True):
         M = self.first_M(M)
         dxy = self.dxys[:M] * self.base
         dxy = F.interpolate(
@@ -252,6 +356,8 @@ class SimuModel(nn.Module):
         if with_score:
             scores = self.get_scores(M=M)
             boxes = torch.cat([boxes, scores], dim=1)
+        if length > 0:
+            boxes = boxes[:, :, :length]
         return boxes
 
     def get_feats(self, M=-1):

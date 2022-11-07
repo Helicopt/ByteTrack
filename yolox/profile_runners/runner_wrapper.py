@@ -1,5 +1,6 @@
 from loguru import logger
 import numpy as np
+from yolox.utils import is_main_process
 
 
 class Runner:
@@ -17,7 +18,7 @@ class Runner:
         ret = {}
         for vid in boxes2:
             ret[vid] = {}
-            first_flag = True
+            first_flag = is_main_process()
             for frame_id in boxes2[vid]:
                 boxes_a = boxes1[vid].get(frame_id, None)
                 boxes_b = boxes2[vid][frame_id]

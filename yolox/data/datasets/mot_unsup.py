@@ -327,6 +327,10 @@ class UnSupMOTDataset(Dataset):
         metrics_all = {}
         vid_keys = sorted(list(self.video_infos.keys()))
         metrics_threads = [None] * len(vid_keys)
+        if num is None:
+            logger.info('test all frames')
+        else:
+            logger.info('test first {} frames'.format(num))
 
         def thread_vid_metricc(vid, i):
             samples = []
@@ -474,7 +478,7 @@ class UnSupMOTDataset(Dataset):
             state_data[vid] = (kwargs, (m_state, None))
         return state_data
 
-    def set_profile(self, model_class, profile_data):
+    def set_profile(self, model_class, profile_data, skip_test=False):
         self.profile_data = profile_data
         self.profile_boxes = {}
         self.offsets = {}
@@ -493,7 +497,7 @@ class UnSupMOTDataset(Dataset):
             icnt += idmax + 1
             self.profile_boxes[vid] = boxes  # .permute(2, 0, 1).detach().cpu().numpy()
         self.profile_inited = True
-        if is_main_process():
+        if is_main_process() and not skip_test:
             self.pretest_pseudo_labels(num=None)
 
     def load_anno(self, index):

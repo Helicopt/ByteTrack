@@ -547,7 +547,7 @@ class GradRunner:
     def optimize_new(self, model, observations, last_results=None):
         data = self.load_data(observations)
         seq_len = data['length']
-        seq_len = 300
+        # seq_len = 300
         # print(seq_len)
         klen = 100  # self.segment
         gap = 10  # self.gap
@@ -556,7 +556,8 @@ class GradRunner:
         ori_input = input_data
         model.train()
         model = model.cuda()
-        model.self_check()
+        if is_main_process():
+            model.self_check()
         # all_boxes = []
         m_boxes = []
         for frame_id in range(0, seq_len, klen - gap):

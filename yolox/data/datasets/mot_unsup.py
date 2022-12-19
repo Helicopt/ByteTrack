@@ -11,6 +11,11 @@ except ImportError:
     mc_enable = False
     logger.info('memcache is NOT enabled')
     # print('memcache is NOT enabled')
+try:
+    from petrel_client.client import Client as pc
+    pc_enable = True
+except ImportError:
+    pc_enable = False
 import cv2
 import time
 import threading
@@ -270,6 +275,7 @@ class UnSupMOTDataset(Dataset):
         subset=None,
         preproc=None,
         skip_test=False,
+        use_s3=None,
     ):
         """
         COCO dataset initialization. Annotation data are read into memory by COCO API.
@@ -285,6 +291,9 @@ class UnSupMOTDataset(Dataset):
             data_dir = os.path.join(get_yolox_datadir(), "mot")
         self.data_dir = data_dir
         self.json_file = json_file
+        if pc_enable:
+            self.pc = None
+        self.use_s3 = use_s3
 
         self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
         self.ids = self.coco.getImgIds()
@@ -414,8 +423,10 @@ class UnSupMOTDataset(Dataset):
     def _load_coco_annotations(self):
         self.ids2indices = {_ids: i for i, _ids in enumerate(self.ids)}
         ret = [self.load_anno_from_ids(_ids) for _ids in self.ids]
-        for vid in self.video_infos:
+        for vid in list(self.video_infos.keys())[:20]:
             logger.info('loaded video [%d]: %d frames' % (vid, len(self.video_infos[vid])))
+        if len(self.video_infos) > 20:
+            logger.info('loaded {} videos in total'.format(len(self.video_infos)))
         return ret
 
     def load_anno_from_ids(self, id_):
@@ -509,16 +520,32 @@ class UnSupMOTDataset(Dataset):
                 server_list_config_file, client_config_file)
         return
 
+    def _ensure_petrel(self):
+        assert pc_enable, 'No Petrel Client is found'
+        if self.pc is None:
+            self.pc = pc()
+
     def get_image_data(self, img_file):
-        if mc_enable:
-            self._ensure_memcached()
-            value = mc.pyvector()
-            self.mclient.Get(img_file, value)
-            value_buf = mc.ConvertBuffer(value)
-            img_array = np.frombuffer(value_buf, np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        else:
-            img = cv2.imread(img_file)
+        try:
+            if 's3:' in img_file:
+                self._ensure_petrel()
+                img_bytes = self.pc.get(img_file)
+                assert img_bytes is not None, img_file
+                img_mem_view = memoryview(img_bytes)
+                img_array = np.frombuffer(img_mem_view, np.uint8)
+                img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            elif mc_enable:
+                self._ensure_memcached()
+                value = mc.pyvector()
+                self.mclient.Get(img_file, value)
+                value_buf = mc.ConvertBuffer(value)
+                img_array = np.frombuffer(value_buf, np.uint8)
+                img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            else:
+                img = cv2.imread(img_file)
+        except Exception as e:
+            logger.error('%s cannot be loaded, error: %s' % (img_file, str(e)))
+            raise e
         assert img is not None
         return img
 
@@ -557,7 +584,7 @@ class UnSupMOTDataset(Dataset):
         # load image and preprocess
         img_file = os.path.join(
             self.data_dir, self.name, file_name
-        )
+        ) if self.use_s3 is None else os.path.join(self.use_s3, file_name)
         img = self.get_image_data(img_file)
 
         if with_label:
@@ -580,7 +607,7 @@ class UnSupMOTDataset(Dataset):
                         _, _, fn, _ = self.annotations[self.ids2indices[nxt_id]]
                         nxt_image = self.get_image_data(os.path.join(
                             self.data_dir, self.name, fn
-                        ))
+                        ) if self.use_s3 is None else os.path.join(self.use_s3, fn))
                         adj_imgs.append(nxt_image)
                 if len(adj_imgs) == 1:
                     logger.info('video[%d] frame %d is isolated.' % (video_id, frame_id))

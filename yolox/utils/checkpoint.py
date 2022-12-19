@@ -6,6 +6,7 @@ import shutil
 from loguru import logger
 
 import torch
+from .dist import is_main_process
 
 import io
 import shutil
@@ -21,19 +22,21 @@ def load_ckpt(model, ckpt):
     load_dict = {}
     for key_model, v in model_state_dict.items():
         if key_model not in ckpt:
-            logger.warning(
-                "{} is not in the ckpt. Please double check and see if this is desired.".format(
-                    key_model
+            if is_main_process():
+                logger.warning(
+                    "{} is not in the ckpt. Please double check and see if this is desired.".format(
+                        key_model
+                    )
                 )
-            )
             continue
         v_ckpt = ckpt[key_model]
         if v.shape != v_ckpt.shape:
-            logger.warning(
-                "Shape of {} in checkpoint is {}, while shape of {} in model is {}.".format(
-                    key_model, v_ckpt.shape, key_model, v.shape
+            if is_main_process():
+                logger.warning(
+                    "Shape of {} in checkpoint is {}, while shape of {} in model is {}.".format(
+                        key_model, v_ckpt.shape, key_model, v.shape
+                    )
                 )
-            )
             continue
         load_dict[key_model] = v_ckpt
 

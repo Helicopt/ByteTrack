@@ -45,6 +45,7 @@ def launch(
     backend="nccl",
     dist_url=None,
     args=(),
+    ignore_cuda=False,
 ):
     """
     Args:
@@ -75,6 +76,7 @@ def launch(
                 backend,
                 dist_url,
                 args,
+                ignore_cuda,
             )
             exit()
         launch_by_subprocess(
@@ -85,6 +87,7 @@ def launch(
             num_gpus_per_machine,
             dist_url,
             args,
+            ignore_cuda,
         )
     else:
         main_func(*args)
@@ -98,6 +101,7 @@ def launch_by_subprocess(
     num_gpus_per_machine,
     dist_url,
     args,
+    ignore_cuda=False,
 ):
     assert (
         world_size > 1
@@ -131,7 +135,7 @@ def launch_by_subprocess(
     current_env["MASTER_ADDR"] = dist_url
     current_env["MASTER_PORT"] = str(port)
     current_env["WORLD_SIZE"] = str(world_size)
-    assert num_gpus_per_machine <= torch.cuda.device_count()
+    assert ignore_cuda or num_gpus_per_machine <= torch.cuda.device_count()
 
     if "OMP_NUM_THREADS" not in os.environ and num_gpus_per_machine > 1:
         current_env["OMP_NUM_THREADS"] = str(1)
@@ -203,6 +207,7 @@ def _distributed_worker(
     backend,
     dist_url,
     args,
+    ignore_cuda=False,
 ):
     assert (
         torch.cuda.is_available()
@@ -229,8 +234,9 @@ def _distributed_worker(
     ):
         os.remove("./" + args[1].experiment_name + "_ip_add.txt")
 
-    assert num_gpus_per_machine <= torch.cuda.device_count()
-    torch.cuda.set_device(local_rank)
+    if not ignore_cuda:
+        assert num_gpus_per_machine <= torch.cuda.device_count()
+        torch.cuda.set_device(local_rank)
 
     args[1].local_rank = local_rank
     args[1].num_machines = num_machines

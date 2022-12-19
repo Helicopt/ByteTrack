@@ -3,6 +3,8 @@ import datetime
 import time
 import numpy as np
 import torch
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 import torch.backends.cudnn as cudnn
 
 from yolox.core import launch
@@ -152,7 +154,7 @@ if __name__ == "__main__":
         args.experiment_name = exp.exp_name
 
     num_gpu = torch.cuda.device_count() if args.devices is None else args.devices
-    assert num_gpu <= torch.cuda.device_count()
+    # assert num_gpu <= torch.cuda.device_count()
 
     launch(
         main,
@@ -162,4 +164,5 @@ if __name__ == "__main__":
         backend=args.dist_backend,
         dist_url=args.dist_url,
         args=(exp, args),
+        ignore_cuda=True,
     )

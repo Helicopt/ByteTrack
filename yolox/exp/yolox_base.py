@@ -258,4 +258,6 @@ class Exp(BaseExp):
                 w = int(args[0])
                 if w == 1920:
                     self.test_size = (736, 1920)
+                if w == 1600:
+                    self.test_size = (896, 1600)
             self.get_eval_loader = self.get_test_real_loader

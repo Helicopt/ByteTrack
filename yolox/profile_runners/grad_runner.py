@@ -12,6 +12,13 @@ import cv2
 import os
 import pickle as pkl
 from lap import lapjv
+from pycocotools.coco import COCO
+try:
+    from petrel_client.client import Client as pc
+    has_petrel = True
+    pclient = pc()
+except ImportError:
+    has_petrel = False
 
 
 def to_device(data, device='cuda'):
@@ -31,6 +38,18 @@ def to_device(data, device='cuda'):
         raise TypeError('Unknown type: {}'.format(type(data)))
 
 
+def read_im_ceph(s3_path, **kwargs):
+    if not has_petrel:
+        return None
+    img_file = s3_path
+    img_bytes = pclient.get(img_file)
+    assert img_bytes is not None, img_file
+    img_mem_view = memoryview(img_bytes)
+    img_array = np.frombuffer(img_mem_view, np.uint8)
+    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    return img
+
+
 class GradRunner:
 
     def __init__(self, iter_num=300, segment=100, gap=10, track_lr=0.01, track_ratio=0.6, track_thr=0.3, merge_thr=0.8, nms_thr=0.4, s_weight=100, i_weight=10, ):
@@ -48,6 +67,20 @@ class GradRunner:
 
         self._vid = -1
         self._mode = 'normal'
+        self.data_dir = '/mnt/lustre/fengweitao.vendor/code/ByteTrack/datasets/LUP'
+        self.json_file = 'train.json'
+        self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
+        self.ids = self.coco.getImgIds()
+
+        def load_anno_from_ids(id_):
+            im_ann = self.coco.loadImgs(id_)[0]
+            frame_id = im_ann["frame_id"]
+            video_id = im_ann["video_id"]
+            filename = im_ann["file_name"]
+            return (video_id, frame_id), filename
+        self.video_map = dict(
+            load_anno_from_ids(id_) for id_ in self.ids
+        )
 
     def set_video_id(self, vid):
         self._vid = vid
@@ -134,6 +167,7 @@ class GradRunner:
         return input_data
 
     def get_seq_info(self):
+        return 'LUP', 'LUP-{}'.format(self._vid)
         return {
             1: ('MOT20', 'MOT20-01'),
             2: ('MOT20', 'MOT20-02'),
@@ -151,10 +185,12 @@ class GradRunner:
         }[self._vid]
 
     def restore_path(self, meta, frame):
-        fr = meta[frame]['fr']
-        ds, seq = self.get_seq_info()
-        img_path = '/mnt/lustre/fengweitao.vendor/code/ByteTrack/datasets/%s/train/%s/img1/%06d.jpg' % (
-            ds, seq, fr)
+        # fr = meta[frame]['fr']
+        # ds, seq = self.get_seq_info()
+        # img_path = '/mnt/lustre/fengweitao.vendor/code/ByteTrack/datasets/%s/train/%s/img1/%06d.jpg' % (
+        #     ds, seq, fr)
+        filename = self.video_map[(self._vid, frame + 1)]
+        img_path = os.path.join('cluster1:s3://toka/LUP_images', filename)
         return img_path
 
     def calc_acc(self, dets, length, thr=-1., max_area=30000):
@@ -277,15 +313,15 @@ class GradRunner:
         # res = model.get_boxes(M=instance_ptr, length=klen+1).permute(
         #     0, 2, 1).detach().cpu().numpy()
         res_post = self.post_process(boxes).detach().cpu().numpy()
-        cur_acc = self.calc_acc(res.transpose(
-            1, 0, 2), length=frange, thr=0.3, max_area=100000)
-        post_acc = self.calc_acc(res_post.transpose(
-            1, 0, 2), length=frange, thr=0.3, max_area=100000)
+        # cur_acc = self.calc_acc(res.transpose(
+        #     1, 0, 2), length=frange, thr=0.3, max_area=100000)
+        # post_acc = self.calc_acc(res_post.transpose(
+        #     1, 0, 2), length=frange, thr=0.3, max_area=100000)
         if is_main_process():
             logger.info('current tracks: %d' % (res.shape[0], ))
-            logger.info('before acc: %s, current acc: %s, post acc: %s' %
-                        (str(bef_acc), str(cur_acc), str(post_acc)))
-        return
+            # logger.info('before acc: %s, current acc: %s, post acc: %s' %
+            #             (str(bef_acc), str(cur_acc), str(post_acc)))
+        # return
         # if tag=='m':
         #     print(res[0])
         for j in range(*frange):
@@ -295,7 +331,10 @@ class GradRunner:
             #     print(res[0, j])
             img_path = self.restore_path(input_data['metas'], j)
             row = res[:, j]
-            im = cv2.imread(img_path)
+            if has_petrel:
+                im = read_im_ceph(img_path)
+            else:
+                im = cv2.imread(img_path)
             for uid, box in enumerate(row):
                 x1, y1, x2, y2, conf = map(float, box)
                 D = Det(x1, y1, x2 - x1, y2 -
@@ -453,7 +492,8 @@ class GradRunner:
         #         boxes[first] = merged_box
         #     boxes = boxes[mask]
         if len(keep) == 0:
-            logger.info('warn: masking out all boxes {}=>{}'.format(len(track_boxes), 0))
+            if is_main_process():
+                logger.info('warn: masking out all boxes {}=>{}'.format(len(track_boxes), 0))
             ret = boxes
         else:
             keep = torch.stack(keep)
@@ -549,8 +589,8 @@ class GradRunner:
         seq_len = data['length']
         # seq_len = 300
         # print(seq_len)
-        klen = 100  # self.segment
-        gap = 10  # self.gap
+        klen = self.segment
+        gap = self.gap
         input_data = self.build_input(data, length=seq_len)
         input_data = to_device(input_data, device='cuda')
         ori_input = input_data
@@ -579,7 +619,8 @@ class GradRunner:
                 ))
             model.resize(instance_ptr, clean=True)
             optimizer = torch.optim.AdamW(model.parameters(), lr=self.track_lr, weight_decay=0.)
-            bef_acc = self.calc_acc(input_data['dets'], length=frange, max_area=100000)
+            # bef_acc = self.calc_acc(input_data['dets'], length=frange, max_area=100000)
+            bef_acc = 0.
             iter_num = self.iter_num
             model.update_observations(
                 (input_data['dets'][frame_id][:instance_ptr],
@@ -615,8 +656,8 @@ class GradRunner:
                     v_boxes.append(one_track[i])
                     # mask.append(keep)
                 # model.recompose(mask)
-                self.visualize2(model, ori_input, bef_acc,
-                                klen, frange, v_boxes)
+                # self.visualize2(model, ori_input, bef_acc,
+                #                 klen, frange, v_boxes)
             # if is_main_process():
             #     logger.info('clearning up')
             # input_data, _ = self.remove(model, input_data, added)
@@ -624,11 +665,12 @@ class GradRunner:
             # one_track = model.get_boxes()
             # for i in range(one_track.shape[0]):
             #     all_boxes.append(one_track[i])
-            all_bef_acc = self.calc_acc(input_data['dets'], length=seq_len, max_area=100000)
+            # all_bef_acc = self.calc_acc(input_data['dets'], length=seq_len, max_area=100000)
+            all_bef_acc = 0.
             # self.visualize2(model, ori_input, all_bef_acc,
             #                 klen, (0, seq_len - 1), all_boxes)
-            self.visualize2(model, ori_input, all_bef_acc,
-                            klen, (0, seq_len - 1), m_boxes, tag='m')
+            # self.visualize2(model, ori_input, all_bef_acc,
+            #                 klen, (0, seq_len - 1), m_boxes, tag='m')
             ret = self.post_process(m_boxes, to_dict=True)
 
         # _, input_data = self.remove(ori_input, all_boxes)

@@ -1,6 +1,7 @@
 from loguru import logger
 import numpy as np
 from yolox.utils import is_main_process
+import time
 
 
 class Runner:
@@ -29,9 +30,11 @@ class Runner:
                 ret[vid][frame_id] = boxes_c
         return ret
 
-    def optimize(self, model, todos, observations):
+    def optimize(self, model, todos, observations, saver_func=None, epoch=None):
         ret = {}
-        for k in todos:
+        be = time.time()
+        tot = len(todos)
+        for cur, k in enumerate(todos):
             kwargs, (state_dict, results) = todos[k]
             model_inst = model(**kwargs)
             model_inst.load_state_dict(state_dict)
@@ -42,4 +45,11 @@ class Runner:
             kwargs['track_num'] = new_track_num
             new_state_dict = model_inst.state_dict()
             ret[k] = kwargs, ({k: v.detach().cpu() for k, v in new_state_dict.items()}, new_results)
+            if saver_func is not None:
+                saver_func({k: ret[k]}, epoch)
+            if is_main_process():
+                eta = int((time.time() - be) / (cur + 1) * (tot - cur - 1))
+                eta_str = '{} d {} hrs {} mins'.format(
+                    eta // 86400, eta % 86400 // 3600, eta % 3600 // 60)
+                logger.info('ptl progress: {}/{}, remaining time: {}'.format(cur+1, tot, eta_str))
         return ret

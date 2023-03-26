@@ -159,7 +159,7 @@ class MOTEvaluator:
                 elif video_name == 'MOT17-14':
                     self.args.track_thresh = 0.67
                 elif video_name in ['MOT20-06', 'MOT20-08']:
-                    self.args.track_thresh = 0.3
+                    self.args.track_thresh = 0.5
                     model_type = str(model.backbone.__class__)
                     if first_time:
                         logger.info(model_type)
@@ -167,10 +167,12 @@ class MOTEvaluator:
                         self.args.track_thresh = 0.6
                         if first_time:
                             logger.info('special setting for R50: %.3f' % self.args.track_thresh)
+                # elif video_name in ['MOT20-04']:
+                #     self.args.track_thresh = 0.6
                 else:
                     self.args.track_thresh = ori_thresh
                 if self.args.ldr:
-                    self.args.track_thresh += 0.1
+                    self.args.track_thresh += 0.05
                     if first_time:
                         logger.info('special setting for low label regime: %.3f' % self.args.track_thresh)
                 first_time = False

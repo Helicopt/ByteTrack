@@ -73,6 +73,8 @@ class Trainer:
             mode="a",
         )
 
+        self.save_interval = exp.save_interval if hasattr(exp, 'save_interval') else -1
+
     def train(self):
         self.before_train()
         try:
@@ -176,9 +178,10 @@ class Trainer:
 
         if self.id_profile:
             self.profiling_model, self.profiling_data = self.exp.get_profiling_model()
+            self.profiling_epoch = {}
             if self.start_epoch == 0:
                 p_data, epoch = self.resume_profiling(return_epoch=True)
-                if p_data is None and epoch is None or epoch != 0:
+                if epoch == 0:
                     self.id_profiling(epoch=0)
                 else:
                     self.profiling_data = p_data
@@ -186,16 +189,18 @@ class Trainer:
                 self.profiling_data, epoch = self.resume_profiling(return_epoch=True)
                 if self.multi_stage:
                     target_epoch = (self.start_epoch // self.exp.eval_interval) * self.exp.eval_interval
-                    if target_epoch > epoch:
+                    if target_epoch > epoch - 1:
                         self.id_profiling(epoch=target_epoch)
             self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
 
         logger.info("init prefetcher, this might take one minute or less...")
         self.prefetcher = DataPrefetcher(self.train_loader)
 
+        logger.info("prefetcher has been inited.")
         self.evaluator = self.exp.get_evaluator(
             batch_size=self.args.batch_size, is_distributed=self.is_distributed
         )
+        logger.info("evaluator has been inited.")
         # Tensorboard logger
         if self.rank == 0:
             self.tblogger = SummaryWriter(self.file_name)
@@ -248,10 +253,12 @@ class Trainer:
             self.evaluate_and_save_model()
 
         self.save_ckpt(ckpt_name="latest")
+        if self.save_interval > 0 and (self.epoch + 1) % self.save_interval == 0:
+            self.save_ckpt(ckpt_name="epoch_{}".format(self.epoch + 1))
 
         if self.id_profile and self.multi_stage:
             if (self.epoch + 1) % self.exp.eval_interval == 0 and self.exp.eval_interval > 1:
-                self.id_profiling(epoch=self.epoch + 1)
+                self.id_profiling(epoch=(self.epoch + 1)//self.exp.eval_interval)
                 self.train_loader.dataset._dataset.set_profile(self.profiling_model, self.profiling_data)
                 if is_main_process():
                     logger.info("init prefetcher, this might take one minute or less...")
@@ -378,9 +385,10 @@ class Trainer:
                 ckpt_name,
             )
 
-    def get_profile_partition(self):
+    def get_profile_partition(self, epoch):
         rank = self.rank
-        all_ids = sorted(self.profiling_data.keys(), key=lambda x: abs(x - 4) * 2 + int(x > 4))
+        all_ids = list(filter(lambda x: self.profiling_epoch[x] != epoch, 
+            sorted(self.profiling_data.keys(), key=lambda x: abs(x - 4) * 2 + int(x > 4))))
         n = len(all_ids)
         WS = get_world_size()
         S = (n + WS - 1) // WS
@@ -398,7 +406,7 @@ class Trainer:
         return preds
 
     def id_profiling(self, epoch):
-        todos = self.get_profile_partition()
+        todos = self.get_profile_partition(epoch)
         self.profile_runner = self.exp.get_profile_runner()
         if len(todos) > 0:
             gt_ssl = self.train_loader.dataset._dataset.pseu_boxes(todos)
@@ -411,35 +419,43 @@ class Trainer:
             torch.cuda.empty_cache()
             if epoch > 0:
                 self.profile_runner.set_mode('hybrid')
-            new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation)
+            new_data = self.profile_runner.optimize(self.profiling_model, {k: self.profiling_data[k] for k in todos}, observation, saver_func=self.save_profiling, epoch=epoch)
             self.model.to(self.device)
             if self.args.occupy:
                 occupy_mem(self.local_rank, mem_ratio=0.5)
-            self.save_profiling(new_data, epoch)
+            # self.save_profiling(new_data, epoch)
         if is_main_process():
             logger.info('waiting other processes to sync')
         synchronize()
         self.profiling_data = self.resume_profiling()
 
     def resume_profiling(self, return_epoch=False):
-        for k in self.profiling_data.keys():
-            filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
-            if not ckpt_exists(filename):
-                if return_epoch:
-                    return None, None
-                return None
+        # for k in self.profiling_data.keys():
+        #     filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
+        #     if not ckpt_exists(filename):
+        #         if return_epoch:
+        #             return None, None
+        #         return None
         epoch = None
+        profile_prefix = self.exp.profile_path if hasattr(self.exp, 'profile_path') else self.file_name
         for k in self.profiling_data.keys():
-            filename = os.path.join(self.file_name, 'profile_%s' % str(k) + "_ckpt.pth.tar")
+            filename = os.path.join(profile_prefix, 'profile_%s' % str(k) + "_ckpt.pth.tar")
+            if not ckpt_exists(filename):
+                self.profiling_epoch[k] = -1
+                epoch = 0
+                continue
             d = torch_load(filename)
             kwargs, _ = self.profiling_data[k]
             saved_kwargs = d['data'][0]
-            epoch = d['epoch'] if epoch is None else min(epoch, d['epoch'])
+            epoch = (d['epoch'] + 1) if epoch is None else min(epoch, d['epoch'])
             assert len(set(saved_kwargs.keys()) - set(kwargs.keys())) == 0
             for rk in saved_kwargs:
                 assert kwargs[rk] == saved_kwargs[rk] or rk == 'track_num'
             kwargs['track_num'] = saved_kwargs['track_num']
             self.profiling_data[k] = (kwargs, d['data'][1])
+            self.profiling_epoch[k] = d['epoch']
+        if epoch is None:
+            epoch = 0
         if return_epoch:
             return self.profiling_data, epoch 
         return self.profiling_data

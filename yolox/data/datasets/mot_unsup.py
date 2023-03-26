@@ -80,7 +80,7 @@ def nms(dets, scores, thresh):
     return keep
 
 
-def nms_no_score(boxes, thr=0.5):
+def nms_no_score(boxes, thr=0.4):
     if boxes.shape[1] == 5:
         scores = boxes[:, 4]
         boxes = boxes[:, :4]
@@ -121,7 +121,7 @@ def hard_code_filter(boxes):
 
 
 def selective_search(img, h, w, res_size=128):
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_det = np.array(img)
     ss = cv2.ximgproc.segmentation.createSelectiveSearchSegmentation()
 
@@ -170,10 +170,10 @@ def detect_boxes(p, engine, max_box=300):
         raise NotImplementedError('%s is not recognised' % engine)
 
 
-MULTI_THREAD_ = True
+MULTI_THREAD_ = False
 
 
-def att_search(img, h, w, adj_imgs, res_size=960, max_group=300, w1=0.5, w2=0.3, unmerged=False, box_engine='selective_search', use_sobel=False, rgb=False):
+def att_search(img, h, w, adj_imgs, res_size=960, max_group=300, w1=0.5, w2=0.3, unmerged=False, box_engine='selective_search', use_sobel=False, rgb=False, vis_dict=None):
     scale = min(res_size / img.shape[1], 1.0)
     rW = int(img.shape[1] * scale)
     rH = int(img.shape[0] * scale)
@@ -222,30 +222,28 @@ def att_search(img, h, w, adj_imgs, res_size=960, max_group=300, w1=0.5, w2=0.3,
     else:
         for i, p in enumerate(img_diffs):
             all_boxes[i] = detect_boxes(p, engine=box_engine)
-    gay_boxes = all_boxes[-1]
-    all_boxes = all_boxes[:-1]
+            if isinstance(vis_dict, dict):
+                vis_dict[i] = [p.copy(), all_boxes[i].copy()]
+    # gay_boxes = all_boxes[-1]
+    # all_boxes = all_boxes[:-1]
 
     if unmerged:
         blist = [boxes_[:max_group] for boxes_ in all_boxes]
-        blist.append(gay_boxes[:max_group])
-        boxes2 = np.concatenate(blist, axis=0)
-        boxes2 = nms_no_score(boxes2)
-        boxes = hard_code_filter(boxes2)
+        # blist.append(gay_boxes[:max_group])
     else:
         n = len(all_boxes)
-        for i in range(n):
-            all_boxes[i] = merge_n_clean(gay_boxes, all_boxes[i][:max_group])
-        boxes_list = []
+        # for i in range(n):
+        #     all_boxes[i] = merge_n_clean(gay_boxes, all_boxes[i][:max_group])
+        blist = []
         if n == 2:
-            boxes_list.extend(all_boxes)
+            blist.extend(all_boxes)
         for i in range(n):
             for j in range(i+1, min(n, i+3)):
                 boxes_ = merge_n_clean(all_boxes[i], all_boxes[j])
-
-                boxes_list.append(boxes_)
-        boxes2 = np.concatenate(boxes_list, axis=0)
-        boxes2 = nms_no_score(boxes2)
-        boxes = hard_code_filter(boxes2)
+                blist.append(boxes_)
+    boxes2 = np.concatenate(blist, axis=0)
+    boxes2 = nms_no_score(boxes2)
+    boxes = hard_code_filter(boxes2)
     boxes[..., 2] = boxes[..., 0] + boxes[..., 2]
     boxes[..., 3] = boxes[..., 1] + boxes[..., 3]
     boxes[..., :4] /= scale
@@ -322,6 +320,7 @@ class UnSupMOTDataset(Dataset):
         if self.subset is not None:
             self.filter_data()
         self.max_area = max_area
+        self.skip_test = skip_test
         if is_main_process() and not skip_test:
             if self.strategy == 'profiling' and not self.profile_inited:
                 pass
@@ -419,7 +418,7 @@ class UnSupMOTDataset(Dataset):
         all_ids_set = set(self.ids)
         logger.info('loaded id vs anno id: %d - %d, intersect %d' %
                     (len(loaded_ids), len(self.ids), len(loaded_ids & all_ids_set)))
-        ret = [mp.get(_ids, None) for _ids in self.ids]
+        ret = [mp.get(_ids, np.zeros((0, 6), dtype=np.float)) for _ids in self.ids]
         for oid in all_ids_set - loaded_ids:
             logger.info(str(self.annotations[self.ids2indices[oid]][1]))
         return ret
@@ -508,10 +507,20 @@ class UnSupMOTDataset(Dataset):
             icnt += idmax + 1
             self.profile_boxes[vid] = boxes  # .permute(2, 0, 1).detach().cpu().numpy()
         self.profile_inited = True
-        if is_main_process() and not skip_test:
+        if is_main_process() and not skip_test and not self.skip_test:
             self.pretest_pseudo_labels(num=None)
 
     def load_anno(self, index):
+        if self.action == 'load':
+            if self.strategy != 'profiling':
+                boxes = self.loaded_pseu_labels[index]
+            else:
+                assert self.profile_inited, 'must initiate using set_profile first'
+                img_info = self.annotations[index][1]
+                frame_id = img_info[2]
+                video_id = img_info[3]
+                boxes = self.get_profiling_boxes(video_id, frame_id)
+            return boxes
         return self.annotations[index][0]
 
     def _ensure_memcached(self):
@@ -597,7 +606,7 @@ class UnSupMOTDataset(Dataset):
             h, w = img.shape[:2]
             # selective search has randomness and without caching, the results are better.
             if self.strategy == 'topk':
-                boxes = selective_search(img, h, w, res_size=128)
+                boxes = selective_search(img, h, w, res_size=self.search_size)
                 boxes = boxes[:self.max_prop]
             elif self.strategy == 'att' or self.strategy == 'att_unmerged':
                 frame_id = img_info[2]
